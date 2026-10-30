@@ -1,86 +1,101 @@
 import logging
 
-from src.controllers import validators
-from src.database import db, utcnow
-from src.middlewares.error_handler import NotFoundError
+from src.controllers.validators import parse_optional_int, validate_task
+from src.database import utcnow
+from src.errors import ForbiddenError, NotFoundError
+from src.models import category_model, task_model, user_model
+from src.models.task_model import Task
 
 logger = logging.getLogger(__name__)
 
-TASK_NOT_FOUND = "Task não encontrada"
-USER_NOT_FOUND = "Usuário não encontrado"
-CATEGORY_NOT_FOUND = "Categoria não encontrada"
-
 
 class TaskController:
-    def __init__(self, task_model, user_model, category_model, report_service, notification_service):
-        self.tasks = task_model
-        self.users = user_model
-        self.categories = category_model
-        self.reports = report_service
+    def __init__(self, notification_service, report_service):
         self.notifications = notification_service
+        self.reports = report_service
 
-    # ---- leitura -------------------------------------------------------------
-    def list_tasks(self):
+    def list_all(self):
         result = []
-        for task in self.tasks.all_with_relations():
+        for task in task_model.list_tasks_with_relations():
             data = task.to_dict(include_overdue=True)
             data["user_name"] = task.user.name if task.user else None
             data["category_name"] = task.category.name if task.category else None
             result.append(data)
         return result
 
-    def get_task(self, task_id):
+    def get(self, task_id):
         return self._find(task_id).to_dict(include_overdue=True)
 
     def search(self, args):
-        filters = validators.parse_search_filters(args)
-        return [task.to_dict() for task in self.tasks.search(**filters)]
+        tasks = task_model.search_tasks(
+            text=args.get("q", ""),
+            status=args.get("status", ""),
+            priority=parse_optional_int(args.get("priority"), "Prioridade inválida"),
+            user_id=parse_optional_int(args.get("user_id"), "user_id inválido"),
+        )
+        return [task.to_dict() for task in tasks]
 
     def stats(self):
         return self.reports.task_stats()
 
-    # ---- escrita -------------------------------------------------------------
-    def create_task(self, data):
-        fields = validators.validate_new_task(data, self._check_refs)
-        task = self.tasks(**fields)
-        db.session.add(task)
-        db.session.commit()
+    def create(self, data, actor):
+        fields = validate_task(data)
+        self._check_assignment(fields["user_id"], actor)
+        self._check_references(fields)
+
+        task = Task(**fields)
+        task_model.save(task)
         logger.info("Task criada id=%s", task.id)
-        self._notify_assignee(task)
+        self._notify_assignment(task)
         return task.to_dict()
 
-    def update_task(self, task_id, data):
+    def update(self, task_id, data, actor):
         task = self._find(task_id)
-        changes = validators.validate_task_changes(data, self._check_refs)
-        previous_user_id = task.user_id
-        for field, value in changes.items():
-            setattr(task, field, value)
+        self._check_owner(task, actor)
+        fields = validate_task(data, partial=True)
+        if "user_id" in fields:
+            self._check_assignment(fields["user_id"], actor)
+        self._check_references(fields)
+
+        reassigned = "user_id" in fields and fields["user_id"] and fields["user_id"] != task.user_id
+        for name, value in fields.items():
+            setattr(task, name, value)
         task.updated_at = utcnow()
-        db.session.commit()
+        task_model.save(task)
         logger.info("Task atualizada id=%s", task.id)
-        if task.user_id != previous_user_id:
-            self._notify_assignee(task)
+        if reassigned:
+            self._notify_assignment(task)
         return task.to_dict()
 
-    def delete_task(self, task_id):
+    def delete(self, task_id, actor):
         task = self._find(task_id)
-        db.session.delete(task)
-        db.session.commit()
+        self._check_owner(task, actor)
+        task_model.delete(task)
         logger.info("Task deletada id=%s", task_id)
 
-    # ---- apoio ---------------------------------------------------------------
     def _find(self, task_id):
-        task = self.tasks.get(task_id)
+        task = task_model.get_task(task_id)
         if task is None:
-            raise NotFoundError(TASK_NOT_FOUND)
+            raise NotFoundError("Task não encontrada")
         return task
 
-    def _check_refs(self, user_id, category_id):
-        if user_id and self.users.get(user_id) is None:
-            raise NotFoundError(USER_NOT_FOUND)
-        if category_id and self.categories.get(category_id) is None:
-            raise NotFoundError(CATEGORY_NOT_FOUND)
+    @staticmethod
+    def _check_owner(task, actor):
+        if not actor.is_admin() and task.user_id != actor.id:
+            raise ForbiddenError("Acesso negado")
 
-    def _notify_assignee(self, task):
-        if task.user_id:
-            self.notifications.notify_task_assigned(self.users.get(task.user_id), task)
+    @staticmethod
+    def _check_assignment(user_id, actor):
+        if user_id is not None and user_id != actor.id and not actor.is_admin():
+            raise ForbiddenError("Apenas administradores atribuem tasks a outros usuários")
+
+    @staticmethod
+    def _check_references(fields):
+        if fields.get("user_id") and user_model.get_user(fields["user_id"]) is None:
+            raise NotFoundError("Usuário não encontrado")
+        if fields.get("category_id") and category_model.get_category(fields["category_id"]) is None:
+            raise NotFoundError("Categoria não encontrada")
+
+    def _notify_assignment(self, task):
+        if task.user is not None:
+            self.notifications.notify_task_assigned(task.user, task)

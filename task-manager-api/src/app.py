@@ -4,15 +4,12 @@ import logging
 from flask import Flask
 from flask_cors import CORS
 
-from src.config import Settings
+from src.config.settings import Settings
 from src.controllers.category_controller import CategoryController
 from src.controllers.task_controller import TaskController
 from src.controllers.user_controller import UserController
-from src.database import db, init_db
-from src.middlewares.auth import build_auth_guards
+from src.database import init_db
 from src.middlewares.error_handler import register_error_handlers
-from src.models import Category, Task, User
-from src.services.auth_service import AuthService
 from src.services.notification_service import NotificationService
 from src.services.report_service import ReportService
 from src.views.category_routes import build_category_routes
@@ -30,19 +27,16 @@ def create_app(settings=Settings):
     CORS(app, origins=settings.CORS_ORIGINS)
     init_db(app)
 
-    notifications = NotificationService.from_settings(settings)
-    auth = AuthService(settings.SECRET_KEY, settings.AUTH_TOKEN_MAX_AGE)
-    reports = ReportService(Task, User, Category)
-
-    task_controller = TaskController(Task, User, Category, reports, notifications)
-    user_controller = UserController(User, Task, auth)
-    category_controller = CategoryController(Category, Task)
-    require_auth, require_self_or_admin = build_auth_guards(user_controller)
+    notifications = NotificationService(
+        settings.SMTP_HOST, settings.SMTP_PORT, settings.SMTP_USER, settings.SMTP_PASSWORD
+    )
+    reports = ReportService()
+    users = UserController()
 
     app.register_blueprint(build_index_routes())
-    app.register_blueprint(build_task_routes(task_controller, require_auth))
-    app.register_blueprint(build_user_routes(user_controller, require_self_or_admin))
-    app.register_blueprint(build_report_routes(reports, User))
-    app.register_blueprint(build_category_routes(category_controller, require_auth))
-    register_error_handlers(app, db)
+    app.register_blueprint(build_task_routes(TaskController(notifications, reports)))
+    app.register_blueprint(build_user_routes(users))
+    app.register_blueprint(build_report_routes(reports, users))
+    app.register_blueprint(build_category_routes(CategoryController()))
+    register_error_handlers(app)
     return app

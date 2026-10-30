@@ -4,22 +4,23 @@ from datetime import timedelta
 from src.app import create_app
 from src.database import db, utcnow
 from src.models import Category, Task, User
+from src.models.user_model import ROLE_ADMIN, ROLE_MANAGER, ROLE_USER
 
 USERS = [
-    {"name": "João Silva", "email": "joao@email.com", "password": "1234", "role": "admin"},
-    {"name": "Maria Santos", "email": "maria@email.com", "password": "abcd", "role": "user"},
-    {"name": "Pedro Oliveira", "email": "pedro@email.com", "password": "pass", "role": "manager"},
+    ("João Silva", "joao@email.com", "1234", ROLE_ADMIN),
+    ("Maria Santos", "maria@email.com", "abcd", ROLE_USER),
+    ("Pedro Oliveira", "pedro@email.com", "pass", ROLE_MANAGER),
 ]
 
 CATEGORIES = [
-    {"name": "Backend", "description": "Tarefas de backend", "color": "#3498db"},
-    {"name": "Frontend", "description": "Tarefas de frontend", "color": "#2ecc71"},
-    {"name": "DevOps", "description": "Tarefas de infraestrutura", "color": "#e74c3c"},
-    {"name": "Bug", "description": "Correção de bugs", "color": "#e67e22"},
+    ("Backend", "Tarefas de backend", "#3498db"),
+    ("Frontend", "Tarefas de frontend", "#2ecc71"),
+    ("DevOps", "Tarefas de infraestrutura", "#e74c3c"),
+    ("Bug", "Correção de bugs", "#e67e22"),
 ]
 
 
-def _tasks(users, categories):
+def build_tasks(users, categories):
     joao, maria, pedro = users
     backend, frontend, devops, bug = categories
     now = utcnow()
@@ -37,8 +38,8 @@ def _tasks(users, categories):
     ]
 
 
-def seed_data(app=None):
-    app = app or create_app()
+def seed_data():
+    app = create_app()
     with app.app_context():
         db.session.execute(db.delete(Task))
         db.session.execute(db.delete(User))
@@ -46,25 +47,23 @@ def seed_data(app=None):
         db.session.commit()
 
         users = []
-        for user_data in USERS:
-            user = User(name=user_data["name"], email=user_data["email"], role=user_data["role"])
-            user.set_password(user_data["password"])
-            db.session.add(user)
+        for name, email, password, role in USERS:
+            user = User(name=name, email=email, role=role)
+            user.set_password(password)
             users.append(user)
-
-        categories = [Category(**category_data) for category_data in CATEGORIES]
-        db.session.add_all(categories)
+        categories = [Category(name=name, description=description, color=color) for name, description, color in CATEGORIES]
+        db.session.add_all(users + categories)
         db.session.commit()
 
-        for task_data in _tasks(users, categories):
-            user, category = task_data.pop("user"), task_data.pop("category")
-            db.session.add(Task(user_id=user.id, category_id=category.id, **task_data))
+        for fields in build_tasks(users, categories):
+            user, category = fields.pop("user"), fields.pop("category")
+            db.session.add(Task(user_id=user.id, category_id=category.id, **fields))
         db.session.commit()
 
         print("Seed concluído com sucesso!")
-        print(f"  {User.count()} usuários")
-        print(f"  {Category.count()} categorias")
-        print(f"  {Task.count()} tasks")
+        print(f"  {db.session.scalar(db.select(db.func.count(User.id)))} usuários")
+        print(f"  {db.session.scalar(db.select(db.func.count(Category.id)))} categorias")
+        print(f"  {db.session.scalar(db.select(db.func.count(Task.id)))} tasks")
 
 
 if __name__ == "__main__":

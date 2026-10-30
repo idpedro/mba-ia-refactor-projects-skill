@@ -1,49 +1,80 @@
-"""Guarda de autenticação para rotas de escrita (decisão 4).
-
-Desligada por padrão (`AUTH_REQUIRED=0`) para preservar o contrato atual; quando ligada,
-exige `Authorization: Bearer <token>` emitido por POST /login.
-"""
+"""Tokens assinados (itsdangerous) e guards de rota. Sempre ativos: não há flag para desligar."""
 from functools import wraps
 
 from flask import current_app, g, request
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
-from src.middlewares.error_handler import ForbiddenError
+from src.errors import ForbiddenError, UnauthorizedError
+from src.models import user_model
 
-_BEARER = "Bearer "
+BEARER_PREFIX = "Bearer "
 
 
-def build_auth_guards(user_controller):
-    def _enabled():
-        return current_app.config.get("AUTH_REQUIRED", False)
+def _serializer():
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt="auth")
 
-    def _current_user():
-        header = request.headers.get("Authorization", "")
-        token = header[len(_BEARER):] if header.startswith(_BEARER) else None
-        return user_controller.authenticate(token)
 
-    def require_auth(view):
+def issue_token(user_id):
+    return _serializer().dumps({"uid": user_id})
+
+
+def _token_user(token):
+    try:
+        data = _serializer().loads(token, max_age=current_app.config["TOKEN_MAX_AGE"])
+    except (BadSignature, SignatureExpired):
+        raise UnauthorizedError("Token inválido")
+    user = user_model.get_user(data.get("uid"))
+    if user is None:
+        raise UnauthorizedError("Token inválido")
+    if not user.active:
+        raise ForbiddenError("Usuário inativo")
+    return user
+
+
+def current_user(optional=False):
+    header = request.headers.get("Authorization", "")
+    if not header:
+        if optional:
+            return None
+        raise UnauthorizedError("Token ausente")
+    if not header.startswith(BEARER_PREFIX):
+        raise UnauthorizedError("Token inválido")
+    return _token_user(header[len(BEARER_PREFIX):])
+
+
+def require_auth(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        g.current_user = current_user()
+        return view(*args, **kwargs)
+    return wrapper
+
+
+def optional_auth(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        g.current_user = current_user(optional=True)
+        return view(*args, **kwargs)
+    return wrapper
+
+
+def require_admin(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        g.current_user = current_user()
+        if not g.current_user.is_admin():
+            raise ForbiddenError("Acesso restrito a administradores")
+        return view(*args, **kwargs)
+    return wrapper
+
+
+def require_self_or_admin(param):
+    def decorator(view):
         @wraps(view)
         def wrapper(*args, **kwargs):
-            if _enabled():
-                g.current_user = _current_user()
+            g.current_user = current_user()
+            if g.current_user.id != kwargs[param] and not g.current_user.is_admin():
+                raise ForbiddenError("Acesso negado")
             return view(*args, **kwargs)
-
         return wrapper
-
-    def require_self_or_admin(view):
-        """Para rotas /users/<user_id>: só o próprio usuário ou um admin."""
-        @wraps(view)
-        def wrapper(*args, **kwargs):
-            if _enabled():
-                user = _current_user()
-                if user.id != kwargs.get("user_id") and not user.is_admin():
-                    raise ForbiddenError("Acesso negado")
-                body = request.get_json(silent=True)
-                if isinstance(body, dict) and "role" in body and not user.is_admin():
-                    raise ForbiddenError("Apenas administradores alteram roles")
-                g.current_user = user
-            return view(*args, **kwargs)
-
-        return wrapper
-
-    return require_auth, require_self_or_admin
+    return decorator

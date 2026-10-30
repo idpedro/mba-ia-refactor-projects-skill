@@ -21,14 +21,29 @@ class Category(db.Model):
             "created_at": str(self.created_at),
         }
 
-    @classmethod
-    def get(cls, category_id):
-        return db.session.get(cls, category_id)
 
-    @classmethod
-    def all(cls):
-        return db.session.scalars(db.select(cls).order_by(cls.id)).all()
+def get_category(category_id):
+    return db.session.get(Category, category_id)
 
-    @classmethod
-    def count(cls):
-        return db.session.scalar(db.select(db.func.count(cls.id)))
+
+def list_categories():
+    return db.session.scalars(db.select(Category).order_by(Category.id)).all()
+
+
+def count_categories():
+    return db.session.scalar(db.select(db.func.count(Category.id)))
+
+
+def save(category):
+    db.session.add(category)
+    db.session.commit()
+    return category
+
+
+def delete_detaching_tasks(category):
+    """Desvincula as tasks e remove a categoria na mesma transação (sem category_id órfão)."""
+    from src.models.task_model import Task
+
+    db.session.execute(db.update(Task).where(Task.category_id == category.id).values(category_id=None))
+    db.session.delete(category)
+    db.session.commit()
