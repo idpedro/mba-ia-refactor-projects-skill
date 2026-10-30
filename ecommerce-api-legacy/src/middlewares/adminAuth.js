@@ -1,20 +1,18 @@
 const crypto = require('crypto');
+const { UnauthorizedError } = require('../errors');
 
-const BEARER_PREFIX = 'Bearer ';
+const digest = (value) => crypto.createHash('sha256').update(value).digest();
 
-function tokensMatch(given, expected) {
-    const a = Buffer.from(given);
-    const b = Buffer.from(expected);
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
-// Admin routes require `Authorization: Bearer <ADMIN_TOKEN>`; with no token configured they stay closed.
+// Static admin token from config, sent as "Authorization: Bearer <token>".
+// With no token configured every request is rejected (fail closed).
 function createAdminAuth(adminToken) {
+    const expected = adminToken ? digest(adminToken) : null;
+
     return (req, res, next) => {
-        const header = req.get('authorization') || '';
-        const given = header.startsWith(BEARER_PREFIX) ? header.slice(BEARER_PREFIX.length) : '';
-        if (!adminToken || !given || !tokensMatch(given, adminToken)) {
-            return res.status(403).json({ error: 'Forbidden' });
+        const header = req.get('Authorization') || '';
+        const provided = header.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
+        if (!expected || !provided || !crypto.timingSafeEqual(digest(provided), expected)) {
+            return next(new UnauthorizedError());
         }
         return next();
     };

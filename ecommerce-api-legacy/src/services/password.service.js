@@ -2,8 +2,8 @@ const crypto = require('crypto');
 
 const SALT_BYTES = 16;
 const KEY_LENGTH = 64;
-const RANDOM_PASSWORD_BYTES = 32;
 
+// Salted scrypt hashes stored as "salt:hash" (hex).
 class PasswordService {
     hash(raw) {
         const salt = crypto.randomBytes(SALT_BYTES).toString('hex');
@@ -12,16 +12,12 @@ class PasswordService {
     }
 
     verify(raw, stored) {
-        const [salt, hash] = String(stored).split(':');
+        if (typeof raw !== 'string' || typeof stored !== 'string') return false;
+        const [salt, hash] = stored.split(':');
         if (!salt || !hash) return false;
-        const candidate = crypto.scryptSync(raw, salt, KEY_LENGTH);
         const expected = Buffer.from(hash, 'hex');
-        return expected.length === candidate.length && crypto.timingSafeEqual(candidate, expected);
-    }
-
-    // Used when a checkout creates an account without a password: nobody knows it.
-    randomPassword() {
-        return crypto.randomBytes(RANDOM_PASSWORD_BYTES).toString('hex');
+        const candidate = crypto.scryptSync(raw, salt, expected.length);
+        return crypto.timingSafeEqual(candidate, expected);
     }
 }
 

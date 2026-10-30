@@ -1,11 +1,12 @@
 const express = require('express');
 const asyncHandler = require('../middlewares/asyncHandler');
 
-module.exports = function checkoutRoutes(checkoutController) {
+module.exports = (checkoutController) => {
     const router = express.Router();
 
     router.post('/api/checkout', asyncHandler(async (req, res) => {
-        res.status(200).json(await checkoutController.checkout(req.body));
+        const { enrollmentId } = await checkoutController.checkout(req.body);
+        res.status(200).json({ msg: 'Sucesso', enrollment_id: enrollmentId });
     }));
 
     return router;

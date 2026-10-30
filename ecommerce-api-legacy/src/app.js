@@ -27,8 +27,7 @@ const userRoutes = require('./routes/user.routes');
 const { createAdminAuth } = require('./middlewares/adminAuth');
 const { createErrorHandler } = require('./middlewares/errorHandler');
 
-async function buildApp(settings = config) {
-    const logger = createLogger(settings.logLevel);
+async function buildApp(settings, logger) {
     const db = createConnection(settings.dbPath);
     const passwordService = new PasswordService();
 
@@ -59,19 +58,25 @@ async function buildApp(settings = config) {
     app.use(adminRoutes(reportController, adminAuth));
     app.use(userRoutes(userController, adminAuth));
     app.use(createErrorHandler(logger));
+    return app;
+}
 
-    return { app, db, logger };
+async function start(settings = config) {
+    const logger = createLogger(settings.logLevel);
+    if (!settings.adminToken) {
+        logger.warn('ADMIN_TOKEN não definido: rotas de admin vão responder 401 a todas as requisições.');
+    }
+    const app = await buildApp(settings, logger);
+    app.listen(settings.port, () => {
+        logger.info(`Frankenstein LMS rodando na porta ${settings.port}...`);
+    });
 }
 
 if (require.main === module) {
-    buildApp()
-        .then(({ app, logger }) => {
-            app.listen(config.port, () => logger.info(`Frankenstein LMS rodando na porta ${config.port}...`));
-        })
-        .catch((err) => {
-            console.error('Failed to start application', err);
-            process.exit(1);
-        });
+    start().catch((err) => {
+        console.error('Falha ao iniciar a aplicação:', err);
+        process.exit(1);
+    });
 }
 
-module.exports = { buildApp };
+module.exports = { buildApp, start };

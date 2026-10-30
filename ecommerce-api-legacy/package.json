@@ -9,5 +9,8 @@
   "dependencies": {
     "express": "^4.18.2",
     "sqlite3": "^5.1.6"
+  },
+  "allowScripts": {
+    "sqlite3@5.1.7": true
   }
 }

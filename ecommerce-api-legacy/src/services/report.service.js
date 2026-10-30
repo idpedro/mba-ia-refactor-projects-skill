@@ -1,29 +1,33 @@
 const { PAYMENT_STATUS } = require('./payment.service');
 
-const UNKNOWN_STUDENT = 'Unknown';
-
 class ReportService {
     constructor({ courseModel }) {
-        this.courses = courseModel;
+        this.courseModel = courseModel;
     }
 
-    // One row per (course, enrollment) from a single JOIN, grouped here.
+    // Revenue counts PAID payments only; each student lists the amount of their payment, if any.
     async financialReport() {
-        const rows = await this.courses.findFinancialRows();
-        const byCourse = new Map();
+        const rows = await this.courseModel.findAllWithEnrollments();
+        const report = new Map();
+
         for (const row of rows) {
-            if (!byCourse.has(row.course_id)) {
-                byCourse.set(row.course_id, { course: row.course_title, revenue: 0, students: [] });
+            if (!report.has(row.course_id)) {
+                report.set(row.course_id, { course: row.course_title, revenue: 0, students: [] });
             }
             if (row.enrollment_id === null) continue;
-            const entry = byCourse.get(row.course_id);
-            if (row.payment_status === PAYMENT_STATUS.PAID) entry.revenue += row.payment_amount;
-            entry.students.push({
-                student: row.student_name !== null ? row.student_name : UNKNOWN_STUDENT,
-                paid: row.payment_amount !== null ? row.payment_amount : 0,
+
+            const courseData = report.get(row.course_id);
+            const hasPayment = row.payment_amount !== null;
+            if (hasPayment && row.payment_status === PAYMENT_STATUS.PAID) {
+                courseData.revenue += row.payment_amount;
+            }
+            courseData.students.push({
+                student: row.student_name ?? 'Unknown',
+                paid: hasPayment ? row.payment_amount : 0,
             });
         }
-        return [...byCourse.values()];
+
+        return [...report.values()];
     }
 }
 

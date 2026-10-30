@@ -3,9 +3,8 @@ class UserController {
         this.users = userModel;
     }
 
-    async remove(id) {
-        await this.users.deleteWithDependents(id);
-        return 'Usuário deletado.';
+    async delete(id) {
+        await this.users.deleteById(id);
     }
 }
 

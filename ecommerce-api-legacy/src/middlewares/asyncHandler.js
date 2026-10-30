@@ -1,2 +1,4 @@
-// Express 4 does not forward rejected promises; route them to the error handler.
-module.exports = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+// Express 4 does not forward rejected promises to the error middleware on its own.
+const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+module.exports = asyncHandler;

@@ -5,7 +5,7 @@ class CacheService {
     }
 
     set(key, value) {
-        this.logger.debug(`cache set ${key}`);
+        this.logger.debug(`Salvando no cache: ${key}`);
         this.store.set(key, value);
     }
 
