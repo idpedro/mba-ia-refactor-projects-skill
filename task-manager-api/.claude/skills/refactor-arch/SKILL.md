@@ -32,7 +32,7 @@ Done when every catalog entry has been checked against every file, and the quest
 
 ## Phase 3 — Refactoring
 
-1. **Save the report.** Write the Phase 2 report verbatim to `reports/audit-<project-dir>.md` at the git repository root (create `reports/` if missing).
+1. **Save the report.** Write the Phase 2 report verbatim to `reports/<name>.md` at the git repository root (create `reports/` if missing). `<name>` is `audit-project-1` for `code-smells-project`, `audit-project-2` for `ecommerce-api-legacy`, `audit-project-3` for `task-manager-api`, and `audit-<project-dir>` for any other project.
 2. **Baseline.** Before touching code, boot the original app and send one request per endpoint in the inventory, following the "Runtime and baseline" section of `project-analysis.md`. Record status code and response keys in a scratch file outside the project (`/tmp/refactor-arch-<project-dir>/baseline.md`). This baseline is the contract Phase 3 preserves.
 3. **Plan.** Read [`references/mvc-guidelines.md`](references/mvc-guidelines.md) and [`references/refactoring-playbook.md`](references/refactoring-playbook.md). Pick the target layout for this stack, then map every finding to the playbook pattern that resolves it. A finding with no pattern gets a one-line fix plan of its own.
 4. **Refactor** in small moves: config first, then models, controllers, views/routes, error handling, composition root. Boot the app after each move and fix breakage before the next one.

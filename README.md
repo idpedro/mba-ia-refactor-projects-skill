@@ -196,15 +196,15 @@ utils/    helpers             ├── controllers/  task, user, category, vali
 
 | Item | P1 | P2 | P3 |
 |---|---|---|---|
-| **Fase 1:** linguagem detectada corretamente³ | ✓ | ✓ | ✓ |
+| **Fase 1:** linguagem detectada corretamente | ✓ | ✓ | ✓ |
 | **Fase 1:** framework detectado corretamente | ✓ | ✓ | ✓ |
-| **Fase 1:** domínio descrito corretamente | ☐⁴ | ☐⁴ | ☐⁴ |
+| **Fase 1:** domínio descrito corretamente | ✓ | ✓ | ✓ |
 | **Fase 1:** número de arquivos condiz com a realidade | ✓ | ✓ | ✓ |
 | **Fase 2:** relatório segue o template | ✓ | ✓ | ✓ |
 | **Fase 2:** cada finding tem arquivo e linhas exatos | ✓ | ✓ | ✓ |
 | **Fase 2:** findings ordenados CRITICAL → LOW | ✓ | ✓ | ✓ |
 | **Fase 2:** mínimo de 5 findings | ✓ (33) | ✓ (24) | ✓ (68) |
-| **Fase 2:** APIs deprecated detectadas | n/a¹ | n/a¹ | ✓ (9 findings AP-17) |
+| **Fase 2:** APIs deprecated detectadas | n/a¹ | ✓¹ | ✓ (9 findings AP-17) |
 | **Fase 2:** pausa e pede confirmação antes da Fase 3 | ✓ | ✓ | ✓ |
 | **Fase 3:** estrutura de diretórios segue MVC | ✓ | ✓ | ✓ |
 | **Fase 3:** configuração extraída (sem hardcoded) | ✓ | ✓ | ✓ |
@@ -216,67 +216,161 @@ utils/    helpers             ├── controllers/  task, user, category, vali
 | **Fase 3:** aplicação inicia sem erros | ✓ | ✓ | ✓ |
 | **Fase 3:** endpoints originais respondem corretamente | ✓ | ✓² | ✓ |
 
-¹ Os projetos 1 e 2 não usam nenhuma API da tabela de deprecated, então a skill não reportou nenhum finding desse tipo neles.
-² As rotas administrativas do projeto 2 exigem `Authorization: Bearer <ADMIN_TOKEN>` (decisão aprovada no relatório). Com o token, status e corpo são iguais ao original.
-
-³ A saída da Fase 1 não é salva em arquivo. Linguagem, framework e número de arquivos foram conferidos pelo cabeçalho de cada relatório (`Stack:` e `Files:`).
-⁴ Sem registro: o domínio só aparece na saída da Fase 1. Para conferir, rode a skill de novo e veja o campo `Domain:`.
+¹ O projeto 1 não usa nenhuma API da tabela de deprecated. No projeto 2, a skill marcou o estilo de callbacks aninhados do `sqlite3` como AP-17: no relatório commitado isso aparece dentro do finding AP-10, e na reexecução (veja a Fase 1 abaixo) virou um finding AP-17 próprio.
+² As rotas administrativas do projeto 2 exigem `Authorization: Bearer <ADMIN_TOKEN>` (decisão 2 do relatório). Com o token, o relatório financeiro responde igual ao original. O `DELETE /api/users/:id` responde 200, mas agora apaga também matrículas e pagamentos, e o texto mudou de "Usuário deletado, mas as matrículas e pagamentos ficaram sujos no banco." para "Usuário deletado." (decisão 3).
 
 **Pontos em aberto:** no projeto 1, a autenticação completa das rotas de usuários, pedidos e relatórios (AP-11) ficou fora do escopo de propósito. Ela mudaria o contrato de todas essas rotas e está registrada como não resolvida na decisão 7 do relatório. No projeto 3, a guarda de autenticação existe mas vem desligada por padrão (`AUTH_REQUIRED=0`, decisão 4), para preservar o contrato. Ligue com `AUTH_REQUIRED=1`.
 
+### Saída da Fase 1 e pausa da Fase 2
+
+A skill imprime a saída da Fase 1 no terminal, sem salvar em arquivo. Os blocos abaixo vêm de uma reexecução do `/refactor-arch` sobre o código original (commit `6d1ce62`), com `claude -p` e só ferramentas de leitura liberadas. Nos 3 projetos a execução parou em `Phase 2 complete. Proceed with refactoring (Phase 3)? [y/n]` sem criar nem alterar nenhum arquivo.
+
+**Projeto 1**
+```
+================================
+PHASE 1: PROJECT ANALYSIS
+================================
+Language:      Python (versão não fixada)
+Framework:     Flask 3.1.1
+Dependencies:  flask-cors==5.0.1, sqlite3 (stdlib)
+Domain:        API de e-commerce (produtos, usuários, pedidos, itens de pedido, relatórios de vendas)
+Architecture:  Monolithic. Os arquivos `controllers.py`/`models.py` existem, mas `app.py` registra rotas e roda SQL direto, `models.py` mistura 4 domínios com regras de negócio, e tudo depende de um singleton global `get_db()`
+Source files:  4 files analyzed (~780 lines)
+DB tables:     produtos, usuarios, pedidos, itens_pedido
+Endpoints:     19 routes
+Start command: python app.py (porta 5000)
+================================
+```
+
+**Projeto 2**
+```
+================================
+PHASE 1: PROJECT ANALYSIS
+================================
+Language:      JavaScript (Node.js; no engine pinned — local runtime v24.22.1)
+Framework:     Express ^4.18.2
+Dependencies:  sqlite3 ^5.1.6
+Domain:        LMS API com checkout (users, courses, enrollments, payments, audit_logs)
+Architecture:  Monolithic — a single class (AppManager) opens the DB, creates the schema, seeds, registers routes and runs SQL + business rules
+Source files:  3 files analyzed (~180 lines)
+DB tables:     users, courses, enrollments, payments, audit_logs (SQLite ':memory:')
+Endpoints:     3 routes
+Start command: npm start  (node src/app.js, port 3000)
+================================
+```
+
+**Projeto 3**
+```
+================================
+PHASE 1: PROJECT ANALYSIS
+================================
+Language:      Python (versão não fixada no manifesto)
+Framework:     Flask 3.0.0 (flask==3.0.0)
+Dependencies:  flask-sqlalchemy==3.1.1, flask-cors==4.0.0, marshmallow==3.20.1, requests==2.31.0, python-dotenv==1.0.0 (as três últimas não são importadas por nenhum arquivo)
+Domain:        Task Manager API (tasks, users, categories, reports)
+Architecture:  Partially layered — models/, routes/, services/, utils/ existem, mas as rotas fazem queries, calculam atraso e agregam relatórios; services/ e utils/ nunca são chamados
+Source files:  12 files analyzed (~1155 lines)
+DB tables:     users, tasks, categories
+Endpoints:     22 routes
+Start command: python seed.py && python app.py
+================================
+```
+
+Nessa reexecução, a contagem de findings variou um pouco em relação aos relatórios commitados: P1 com 35 em vez de 33, P2 com 26 em vez de 24, P3 com 55 em vez de 68. A variação vem de como o agente agrupa ocorrências do mesmo anti-pattern por arquivo. Todos os critérios continuam atendidos: ≥5 findings e ≥1 CRITICAL/HIGH em cada projeto.
+
 ### Logs das aplicações após a refatoração
 
-Requests feitas contra o código refatorado, com status HTTP retornado:
+Log de acesso dos servidores refatorados, iniciados com o comando original de cada projeto, com o banco em `/tmp`.
 
-**Projeto 1** (`python app.py`, porta 5000)
+**Projeto 1** (`python app.py`)
 ```
-GET /                        200    POST /usuarios               201
-GET /health                  200    POST /login (válido)         200
-GET /produtos                200    POST /login (senha errada)   401
-GET /produtos/1              200    POST /pedidos                201
-GET /produtos/busca?q=mouse  200    GET /pedidos                 200
-GET /produtos/999            404    GET /pedidos/usuario/2       200
-POST /produtos               201    PUT /pedidos/1/status        200
-POST /produtos (inválido)    400    GET /relatorios/vendas       200
-PUT /produtos/2              200    POST /admin/query            403  (ADMIN_ENABLED=0, decisão 3)
-GET /usuarios                200    POST /admin/reset-db         403  (ADMIN_ENABLED=0, decisão 3)
-GET /usuarios/1              200    campo "senha" nas respostas: ausente
+ * Serving Flask app 'src.app'
+ * Debug mode: off
+ * Running on http://127.0.0.1:5000
+[30/Oct/2026 03:44:55] "GET / HTTP/1.1" 200 -
+[30/Oct/2026 03:44:55] "GET /health HTTP/1.1" 200 -
+[30/Oct/2026 03:44:55] "GET /produtos HTTP/1.1" 200 -
+[30/Oct/2026 03:44:55] "GET /produtos/1 HTTP/1.1" 200 -
+[30/Oct/2026 03:44:55] "GET /produtos/busca?q=mouse HTTP/1.1" 200 -
+[30/Oct/2026 03:44:55] "GET /produtos/999 HTTP/1.1" 404 -
+INFO src.controllers.produto_controller: Produto criado id=11
+[30/Oct/2026 03:44:55] "POST /produtos HTTP/1.1" 201 -
+[30/Oct/2026 03:44:55] "PUT /produtos/2 HTTP/1.1" 200 -
+INFO src.controllers.produto_controller: Produto deletado id=3
+[30/Oct/2026 03:44:55] "DELETE /produtos/3 HTTP/1.1" 200 -
+[30/Oct/2026 03:44:55] "GET /usuarios HTTP/1.1" 200 -
+[30/Oct/2026 03:44:55] "GET /usuarios/1 HTTP/1.1" 200 -
+INFO src.controllers.usuario_controller: Usuario criado id=4
+[30/Oct/2026 03:44:55] "POST /usuarios HTTP/1.1" 201 -
+INFO src.controllers.usuario_controller: Login bem-sucedido id=1
+[30/Oct/2026 03:44:56] "POST /login HTTP/1.1" 200 -
+INFO src.controllers.usuario_controller: Login falhou
+[30/Oct/2026 03:44:56] "POST /login HTTP/1.1" 401 -
+INFO src.services.notification_service: EMAIL: pedido 1 criado para usuario 2
+INFO src.services.notification_service: SMS: seu pedido foi recebido (pedido 1)
+INFO src.services.notification_service: PUSH: novo pedido 1 recebido pelo sistema
+[30/Oct/2026 03:44:56] "POST /pedidos HTTP/1.1" 201 -
+[30/Oct/2026 03:44:56] "GET /pedidos HTTP/1.1" 200 -
+[30/Oct/2026 03:44:56] "GET /pedidos/usuario/2 HTTP/1.1" 200 -
+INFO src.services.notification_service: NOTIFICACAO: pedido 1 aprovado, preparar envio
+[30/Oct/2026 03:44:56] "PUT /pedidos/1/status HTTP/1.1" 200 -
+[30/Oct/2026 03:44:56] "GET /relatorios/vendas HTTP/1.1" 200 -
+[30/Oct/2026 03:44:56] "POST /admin/query HTTP/1.1" 403 -
 ```
 
-**Projeto 2** (`npm start`, porta 3000)
+**Projeto 2** (`ADMIN_TOKEN=meu-token npm start`): requests com `curl`, seguidas do log do servidor
 ```
-POST /api/checkout (cartão 4…)         200 {"msg":"Sucesso","enrollment_id":2}
-POST /api/checkout (cartão 5…)         400 Pagamento recusado
-POST /api/checkout (campos faltando)   400 Bad Request
-POST /api/checkout (curso inexistente) 404 Curso não encontrado
-GET  /api/admin/financial-report       200 (com Bearer token) | 403 (sem token / token errado)
-DELETE /api/users/1                    200 Usuário deletado. (com Bearer token)
-log: INFO Processing card ending **** amount=497   ← cartão e chave não aparecem mais no log
+$ POST /api/checkout (cartão 4…)
+{"msg":"Sucesso","enrollment_id":2} -> 200
+$ POST /api/checkout (cartão 5…)
+Pagamento recusado -> 400
+$ GET /api/admin/financial-report (Bearer)
+[{"course":"Clean Architecture","revenue":997,"students":[{"student":"Leonan","paid":997}]},{"course":"Docker","revenue":497,"students":[{"student":"Guilherme","paid":497}]}] -> 200
+$ GET /api/admin/financial-report (sem token)
+{"error":"Forbidden"} -> 403
+$ DELETE /api/users/1 (Bearer)
+Usuário deletado. -> 200
+--- log do servidor
+2026-10-30T06:45:06.869Z INFO Frankenstein LMS rodando na porta 3000...
+2026-10-30T06:45:08.808Z INFO Processing card ending 4444 amount=497
+2026-10-30T06:45:08.842Z INFO Processing card ending 4444 amount=997
 ```
+O número do cartão aparece mascarado e a chave do gateway não aparece mais no log.
 
-**Projeto 3** (`python seed.py && python app.py`, porta 5000)
+**Projeto 3** (`python seed.py && python app.py`)
 ```
-GET /, /health, /tasks, /tasks/1, /tasks/search, /tasks/stats   200
-GET /tasks/999                                                  404
-POST /tasks                                                     201 (inválido: 400)
-PUT /tasks/1, DELETE /tasks/2                                   200
-GET /users, /users/1, /users/1/tasks                            200
-POST /users                                                     201
-PUT /users/2, DELETE /users/3                                   200
-POST /login (credenciais do seed)                               200
-GET /reports/summary, /reports/user/1                           200
-GET /categories                                                 200
-POST /categories                                                201
-PUT /categories/1, DELETE /categories/4                         200
-Mapa de rotas: idêntico ao original (20 rotas) + GET / e GET /health
-campo "password" nas respostas: ausente
+ * Debug mode: off
+ * Running on http://127.0.0.1:5000
+[30/Oct/2026 03:45:12] "GET / HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "GET /health HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "GET /tasks HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "GET /tasks/1 HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "GET /tasks/search?q=a HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "GET /tasks/stats HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "POST /tasks HTTP/1.1" 201 -
+[30/Oct/2026 03:45:12] "PUT /tasks/1 HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "DELETE /tasks/2 HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "GET /users HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "GET /users/1 HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "GET /users/1/tasks HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "POST /users HTTP/1.1" 201 -
+[30/Oct/2026 03:45:12] "PUT /users/2 HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "DELETE /users/3 HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "POST /login HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "GET /reports/summary HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "GET /reports/user/1 HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "GET /categories HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "POST /categories HTTP/1.1" 201 -
+[30/Oct/2026 03:45:12] "PUT /categories/1 HTTP/1.1" 200 -
+[30/Oct/2026 03:45:12] "DELETE /categories/4 HTTP/1.1" 200 -
 ```
+As 20 rotas originais e mais `GET /` e `GET /health` responderam sem erro, e o campo `password` não aparece em nenhuma resposta.
 
 ### Comportamento da skill em stacks diferentes
 
 - **Projeto 1, monólito Python:** a skill criou o layout MVC completo do zero. É onde a análise mais rende: SQL injection e N+1 aparecem por todo o código.
 - **Projeto 2, Express com callbacks:** o padrão "atomic writes and flattened callbacks" do playbook converteu a pirâmide de callbacks em `async/await`, e o checkout passou a rodar numa transação `BEGIN`/`COMMIT`/`ROLLBACK`. Foi preciso manter as respostas em texto puro (`"Bad Request"`, `"Pagamento recusado"`), porque elas fazem parte do contrato.
-- **Projeto 3, parcialmente organizado:** gerou o maior número de findings, porque a skill audita cada arquivo e o código está espalhado em mais arquivos com problemas repetidos. A estrutura existente (`models/`, `routes/`) foi aproveitada e reorganizada em `src/`, com controllers novos recebendo a regra de negócio. Foi também o único projeto com APIs deprecated (`Query.get`, `datetime.utcnow`).
+- **Projeto 3, parcialmente organizado:** gerou o maior número de findings, porque a skill audita cada arquivo e o código está espalhado em mais arquivos com problemas repetidos. A estrutura existente (`models/`, `routes/`) foi aproveitada e reorganizada em `src/`, com controllers novos recebendo a regra de negócio. Foi o projeto com mais APIs deprecated (`Query.get`, `datetime.utcnow`).
 
 ---
 
@@ -305,7 +399,7 @@ cd ../task-manager-api
 claude "/refactor-arch"
 ```
 
-A skill imprime a análise (Fase 1) e o relatório (Fase 2), e para em `Proceed with refactoring (Phase 3)? [y/n]`. Responda `y` para refatorar. A Fase 3 salva o relatório em `reports/audit-<pasta-do-projeto>.md`; neste repositório os arquivos foram renomeados para `audit-project-{1,2,3}.md`.
+A skill imprime a análise (Fase 1) e o relatório (Fase 2), e para em `Proceed with refactoring (Phase 3)? [y/n]`. Responda `y` para refatorar. A Fase 3 salva o relatório em `reports/audit-project-{1,2,3}.md`, na raiz do repositório.
 
 ### Validar a refatoração
 
