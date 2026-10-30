@@ -72,7 +72,7 @@ When one site matches two entries, report it under the more severe one and menti
 
 ### AP-12 Debug mode and unsafe defaults in the entry point
 - **Signals**: `debug=True` / `DEBUG = True` combined with `host="0.0.0.0"` (the Werkzeug debugger allows remote code execution); `CORS(app)` with no origin list; config values that should differ per environment written as literals.
-- **Fix**: P-01.
+- **Fix**: P-01. The fixed defaults are all three of: debug off, bind to `127.0.0.1` (exposing the server on every interface is an explicit `HOST=0.0.0.0` opt-in), and an explicit CORS origin list. The finding stays open while any of them still defaults to the unsafe value.
 
 ---
 
