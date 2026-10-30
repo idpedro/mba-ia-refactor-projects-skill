@@ -1,29 +1,27 @@
 import logging
 
 from src.controllers.validators import validar_filtros_busca, validar_produto
-from src.errors import NotFoundError
+from src.errors import ConflictError, NotFoundError
 
 logger = logging.getLogger(__name__)
 
 
 class ProdutoController:
-    def __init__(self, produto_model):
+    def __init__(self, produto_model, pedido_model):
         self.produtos = produto_model
+        self.pedidos = pedido_model
 
     def listar(self):
-        produtos = self.produtos.listar()
-        logger.debug("Listando %s produtos", len(produtos))
-        return produtos
+        return self.produtos.listar()
 
-    def buscar(self, produto_id):
+    def buscar(self, args):
+        return self.produtos.buscar(**validar_filtros_busca(args))
+
+    def obter(self, produto_id):
         produto = self.produtos.buscar_por_id(produto_id)
-        if not produto:
+        if produto is None:
             raise NotFoundError("Produto não encontrado")
         return produto
-
-    def pesquisar(self, args):
-        filtros = validar_filtros_busca(args)
-        return self.produtos.buscar(**filtros)
 
     def criar(self, dados):
         produto = validar_produto(dados)
@@ -32,11 +30,12 @@ class ProdutoController:
         return produto_id
 
     def atualizar(self, produto_id, dados):
-        self.buscar(produto_id)
-        produto = validar_produto(dados)
-        self.produtos.atualizar(produto_id, **produto)
+        self.obter(produto_id)
+        self.produtos.atualizar(produto_id, **validar_produto(dados))
 
     def deletar(self, produto_id):
-        self.buscar(produto_id)
+        self.obter(produto_id)
+        if self.pedidos.produto_tem_itens(produto_id):
+            raise ConflictError("Produto possui pedidos vinculados")
         self.produtos.deletar(produto_id)
         logger.info("Produto deletado id=%s", produto_id)

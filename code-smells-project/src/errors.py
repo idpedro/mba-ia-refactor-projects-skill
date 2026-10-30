@@ -1,6 +1,4 @@
 class AppError(Exception):
-    """Domain error with the HTTP status the error handler maps it to."""
-
     status = 500
 
     def __init__(self, message):
@@ -22,3 +20,7 @@ class ForbiddenError(AppError):
 
 class NotFoundError(AppError):
     status = 404
+
+
+class ConflictError(AppError):
+    status = 409

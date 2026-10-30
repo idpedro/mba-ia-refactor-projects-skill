@@ -2,20 +2,17 @@ import os
 import secrets
 
 
-def _flag(name, default="0"):
-    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
-
-
 class Settings:
-    """Every environment-dependent value. Secrets come only from the environment."""
-
+    # Sem SECRET_KEY no ambiente, gera uma chave aleatória por boot (tokens expiram a cada reinício).
     SECRET_KEY = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
-    DEBUG = _flag("FLASK_DEBUG")
+    DEBUG = os.environ.get("FLASK_DEBUG", "0") == "1"
     HOST = os.environ.get("HOST", "127.0.0.1")
     PORT = int(os.environ.get("PORT", "5000"))
     DATABASE_PATH = os.environ.get("DATABASE_PATH", "loja.db")
-    CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",")]
-    ADMIN_ENABLED = _flag("ADMIN_ENABLED")
+    CORS_ORIGINS = os.environ.get(
+        "CORS_ORIGINS", "http://localhost:5000,http://127.0.0.1:5000"
+    ).split(",")
+    TOKEN_MAX_AGE = int(os.environ.get("TOKEN_MAX_AGE", "86400"))
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
-    APP_VERSION = os.environ.get("APP_VERSION", "1.0.0")
-    APP_ENV = os.environ.get("APP_ENV", "producao")
+    APP_VERSION = "1.0.0"
+    AMBIENTE = os.environ.get("AMBIENTE", "producao")

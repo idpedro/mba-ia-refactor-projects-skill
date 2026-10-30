@@ -7,8 +7,6 @@ from src.errors import AppError
 
 logger = logging.getLogger(__name__)
 
-MENSAGEM_ERRO_INTERNO = "Erro interno do servidor"
-
 
 def register_error_handlers(app):
     @app.errorhandler(AppError)
@@ -21,5 +19,5 @@ def register_error_handlers(app):
 
     @app.errorhandler(Exception)
     def handle_unexpected(err):
-        logger.exception("Unhandled error")
-        return jsonify({"erro": MENSAGEM_ERRO_INTERNO, "sucesso": False}), 500
+        logger.exception("Erro não tratado")
+        return jsonify({"erro": "Erro interno do servidor", "sucesso": False}), 500
