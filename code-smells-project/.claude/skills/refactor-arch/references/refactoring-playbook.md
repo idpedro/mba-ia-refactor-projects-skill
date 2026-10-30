@@ -141,7 +141,7 @@ Login by plaintext comparison in SQL (`WHERE email = ? AND senha = ?`) becomes: 
 ---
 
 ## P-05 Remove sensitive data from responses, logs and open endpoints
-Fixes AP-04, AP-06, AP-11 (blatant cases).
+Fixes AP-04, AP-06.
 
 **Before**
 ```python
@@ -165,15 +165,14 @@ return jsonify({"status": "ok", "database": "connected"})
 ```js
 logger.info(`Processing card ending ${card.slice(-4)}`);
 ```
-Dangerous admin endpoints, default decision:
+Dangerous admin endpoints keep their route and require the admin role through P-16:
 ```python
 @admin_bp.post("/admin/reset-db")
+@require_admin
 def reset_db():
-    if not current_app.config["ADMIN_ENABLED"]:
-        raise ForbiddenError("Admin endpoints are disabled")
     return jsonify(admin_controller.reset_database()), 200
 ```
-Role from the request body: ignore it on public sign-up (`role = "user"`) unless the decisions say otherwise.
+Role from the request body: ignore it on public sign-up (`role = "user"`).
 
 ---
 
@@ -581,3 +580,137 @@ logger.info("Produto criado id=%s", id)
 logging.basicConfig(level=settings.LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 ```
 Simulated side effects (`print("ENVIANDO SMS...")`) move to a `NotificationService` whose methods log; the controller calls the service. Node: a tiny `logger.js` wrapping `console` with levels is enough when the project has no logging dependency.
+
+---
+
+## P-16 Authentication enforced by default
+Fixes AP-11 (and the access side of AP-04).
+
+The guard is on in the default configuration. No environment variable switches it off: a missing secret makes protected routes reject every request (fail closed), never accept them.
+
+**Route policy** (state it in the Phase 2 decisions):
+- Public: login, sign-up, health/index, and read-only catalog listings meant for anonymous visitors (e.g. `GET /produtos`).
+- Authenticated: everything else that reads or changes data.
+- Owner or admin: routes scoped to one user (`/usuarios/<id>`, `/pedidos/usuario/<id>`, `/users/<user_id>`).
+- Admin only: listings of every user or order, status changes, reports, destructive and admin routes.
+- `401` when the token is missing or invalid, `403` when the user lacks the role or ownership. Both go through the central error handler (P-10).
+
+**Before**
+```python
+@user_bp.route('/login', methods=['POST'])
+def login():
+    ...
+    return jsonify({'token': 'fake-jwt-token-' + str(user.id)})
+
+@app.route("/usuarios", methods=["GET"])
+def listar_usuarios():          # anyone can list every user
+    ...
+```
+**After** (Flask): signed tokens with `itsdangerous`, which ships with Flask. `src/middlewares/auth.py`:
+```python
+from functools import wraps
+from flask import current_app, g, request
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from src.errors import ForbiddenError, UnauthorizedError
+
+def _serializer():
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt="auth")
+
+def issue_token(user_id):
+    return _serializer().dumps({"uid": user_id})
+
+def _current_user():
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        raise UnauthorizedError("Token ausente")
+    try:
+        data = _serializer().loads(header[7:], max_age=current_app.config["TOKEN_MAX_AGE"])
+    except (BadSignature, SignatureExpired):
+        raise UnauthorizedError("Token inválido")
+    user = current_app.extensions["user_model"].get_by_id(data["uid"])
+    if user is None:
+        raise UnauthorizedError("Token inválido")
+    return user
+
+def require_auth(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        g.current_user = _current_user()
+        return view(*args, **kwargs)
+    return wrapper
+
+def require_admin(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        g.current_user = _current_user()
+        if g.current_user["tipo"] != "admin":
+            raise ForbiddenError("Acesso restrito a administradores")
+        return view(*args, **kwargs)
+    return wrapper
+
+def require_self_or_admin(param):
+    def decorator(view):
+        @wraps(view)
+        def wrapper(*args, **kwargs):
+            g.current_user = _current_user()
+            if g.current_user["id"] != kwargs[param] and g.current_user["tipo"] != "admin":
+                raise ForbiddenError("Acesso negado")
+            return view(*args, **kwargs)
+        return wrapper
+    return decorator
+```
+```python
+@bp.post("/login")
+def login():
+    user = controller.login(request.get_json(silent=True))   # 401 on bad credentials
+    return jsonify({"dados": user, "token": issue_token(user["id"]), "sucesso": True}), 200
+
+@bp.get("/usuarios")
+@require_admin
+def listar_usuarios():
+    return jsonify({"dados": controller.listar(), "sucesso": True}), 200
+```
+Use the project's own field names for the role (`tipo`, `role`) and keep the login response keys from the baseline, adding `token`.
+
+**After** (Express, no new dependency): HMAC-signed tokens with `crypto`. `src/middlewares/auth.js`:
+```js
+const crypto = require('crypto');
+const { UnauthorizedError, ForbiddenError } = require('../errors');
+
+function sign(payload, secret) {
+    const body = Buffer.from(JSON.stringify({ ...payload, exp: Date.now() + 86400000 })).toString('base64url');
+    const mac = crypto.createHmac('sha256', secret).update(body).digest('base64url');
+    return `${body}.${mac}`;
+}
+
+function verify(token, secret) {
+    const [body, mac] = (token || '').split('.');
+    if (!body || !mac) throw new UnauthorizedError('Token ausente');
+    const expected = crypto.createHmac('sha256', secret).update(body).digest('base64url');
+    if (mac.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) {
+        throw new UnauthorizedError('Token inválido');
+    }
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString());
+    if (payload.exp < Date.now()) throw new UnauthorizedError('Token expirado');
+    return payload;
+}
+
+const requireAuth = (secret) => (req, res, next) => {
+    try {
+        req.user = verify((req.get('Authorization') || '').replace(/^Bearer /, ''), secret);
+        next();
+    } catch (err) { next(err); }
+};
+
+const requireAdmin = (secret) => (req, res, next) =>
+    requireAuth(secret)(req, res, (err) => {
+        if (err) return next(err);
+        return req.user.role === 'admin' ? next() : next(new ForbiddenError('Acesso restrito a administradores'));
+    });
+
+module.exports = { sign, requireAuth, requireAdmin };
+```
+A project with no login route and only admin routes to protect (e.g. a public checkout plus an admin report) can use a static admin token from config instead, compared with `crypto.timingSafeEqual`. When the token is unset the admin routes answer `401`/`403` to everyone.
+
+**Seeds and validation**: keep a seeded admin whose credentials are documented in the README, so the baseline and validation steps can log in, send `Authorization: Bearer <token>` to protected routes, and confirm that the same routes answer `401` without it.
+

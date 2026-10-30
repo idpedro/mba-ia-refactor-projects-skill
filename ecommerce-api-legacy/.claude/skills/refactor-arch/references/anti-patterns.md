@@ -67,8 +67,8 @@ When one site matches two entries, report it under the more severe one and menti
 - **Fix**: P-11.
 
 ### AP-11 Missing authentication / authorization
-- **Signals**: admin or destructive routes with no auth check; fake tokens (`'fake-jwt-token-' + id`); role taken from the request body on user creation (`role = data.get('role')` letting anyone self-register as admin); any client able to change another user's data.
-- **Fix**: P-05 for the blatant cases; full auth is a Phase 2 **decision** (it changes the API contract).
+- **Signals**: admin or destructive routes with no auth check; routes that list or change users, orders or other per-user data reachable anonymously (`GET /usuarios`, `PUT /pedidos/<id>/status`); fake tokens (`'fake-jwt-token-' + id`); role taken from the request body on user creation (`role = data.get('role')` letting anyone self-register as admin); any client able to change another user's data; an auth guard that exists but is disabled by default (`AUTH_REQUIRED=0`).
+- **Fix**: P-16, enforced by default. The Phase 2 decision covers which routes stay public and how clients authenticate; enforcement itself is never optional.
 
 ### AP-12 Debug mode and unsafe defaults in the entry point
 - **Signals**: `debug=True` / `DEBUG = True` combined with `host="0.0.0.0"` (the Werkzeug debugger allows remote code execution); `CORS(app)` with no origin list; config values that should differ per environment written as literals.

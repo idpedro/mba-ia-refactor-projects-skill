@@ -50,7 +50,8 @@ Phase 2 complete. Proceed with refactoring (Phase 3)? [y/n]
 List each refactor whose effect a client can observe, with the default you will apply on `y`. Typical entries:
 
 - A field removed from responses (password hash, secret key, db path).
-- An endpoint that executes arbitrary SQL or wipes data: default is to keep the route and gate it behind an `ADMIN_ENABLED`-style config flag that defaults off, returning `403`.
+- An endpoint that executes arbitrary SQL or wipes data: keep the route and require the admin role (P-16); anonymous requests get `401`, authenticated non-admins `403`.
+- Authentication (P-16): the public routes (login, sign-up, health/index, public catalog reads), how clients get a token, and which routes need the admin role or ownership. Enforcement is on by default; this decision shapes it and never turns it off.
 - Password hash format changing (existing stored passwords stop matching unless re-seeded or verified with a legacy fallback).
 - Error bodies normalised to one JSON shape.
 - Request or response field renames (default: keep the original names).
