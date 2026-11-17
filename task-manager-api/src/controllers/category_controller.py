@@ -1,37 +1,44 @@
-from src.controllers.validators import validate_category
+import logging
+
+from src.controllers.validators import validate_category_payload
 from src.errors import NotFoundError
-from src.models import category_model, task_model
-from src.models.category_model import DEFAULT_COLOR, Category
-from src.models.task_model import Task
+
+logger = logging.getLogger(__name__)
 
 
 class CategoryController:
-    def list_all(self):
-        task_counts = task_model.count_tasks_by(Task.category_id)
-        result = []
-        for category in category_model.list_categories():
-            data = category.to_dict()
-            data["task_count"] = task_counts.get(category.id, 0)
-            result.append(data)
-        return result
+    def __init__(self, categories):
+        self.categories = categories
+
+    def list(self):
+        return [
+            dict(category.to_dict(), task_count=task_count)
+            for category, task_count in self.categories.list_with_task_counts()
+        ]
 
     def create(self, data):
-        fields = validate_category(data)
-        fields.setdefault("color", DEFAULT_COLOR)
-        return category_model.save(Category(**fields)).to_dict()
+        fields = validate_category_payload(data, creating=True)
+        category = self.categories(**fields)
+        category.save()
+        logger.info('Categoria criada id=%s', category.id)
+        return category.to_dict()
 
     def update(self, category_id, data):
-        category = self._find(category_id)
-        for name, value in validate_category(data, partial=True).items():
+        category = self._get_or_404(category_id)
+        fields = validate_category_payload(data, creating=False)
+        for name, value in fields.items():
             setattr(category, name, value)
-        return category_model.save(category).to_dict()
+        category.save()
+        return category.to_dict()
 
     def delete(self, category_id):
-        category_model.delete_detaching_tasks(self._find(category_id))
+        category = self._get_or_404(category_id)
+        category.delete_detaching_tasks()
+        logger.info('Categoria deletada id=%s', category_id)
+        return {'message': 'Categoria deletada'}
 
-    @staticmethod
-    def _find(category_id):
-        category = category_model.get_category(category_id)
+    def _get_or_404(self, category_id):
+        category = self.categories.get(category_id)
         if category is None:
-            raise NotFoundError("Categoria não encontrada")
+            raise NotFoundError('Categoria não encontrada')
         return category

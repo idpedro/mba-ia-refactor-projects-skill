@@ -4,46 +4,45 @@ from src.middlewares.auth import issue_token, optional_auth, require_admin, requ
 
 
 def build_user_routes(controller):
-    bp = Blueprint("users", __name__)
+    bp = Blueprint('users', __name__)
 
-    @bp.get("/users")
+    @bp.get('/users')
     @require_admin
     def get_users():
-        return jsonify(controller.list_all()), 200
+        return jsonify(controller.list()), 200
 
-    @bp.get("/users/<int:user_id>")
-    @require_self_or_admin("user_id")
+    @bp.get('/users/<int:user_id>')
+    @require_self_or_admin('user_id')
     def get_user(user_id):
         return jsonify(controller.get(user_id)), 200
 
-    @bp.post("/users")
+    @bp.post('/users')
     @optional_auth
     def create_user():
         return jsonify(controller.create(request.get_json(silent=True), g.current_user)), 201
 
-    @bp.put("/users/<int:user_id>")
-    @require_self_or_admin("user_id")
+    @bp.put('/users/<int:user_id>')
+    @require_self_or_admin('user_id')
     def update_user(user_id):
         return jsonify(controller.update(user_id, request.get_json(silent=True), g.current_user)), 200
 
-    @bp.delete("/users/<int:user_id>")
+    @bp.delete('/users/<int:user_id>')
     @require_admin
     def delete_user(user_id):
-        controller.delete(user_id)
-        return jsonify({"message": "Usuário deletado com sucesso"}), 200
+        return jsonify(controller.delete(user_id)), 200
 
-    @bp.get("/users/<int:user_id>/tasks")
-    @require_self_or_admin("user_id")
+    @bp.get('/users/<int:user_id>/tasks')
+    @require_self_or_admin('user_id')
     def get_user_tasks(user_id):
-        return jsonify(controller.tasks(user_id)), 200
+        return jsonify(controller.tasks_of(user_id)), 200
 
-    @bp.post("/login")
+    @bp.post('/login')
     def login():
-        user = controller.authenticate(request.get_json(silent=True))
+        user = controller.login(request.get_json(silent=True))
         return jsonify({
-            "message": "Login realizado com sucesso",
-            "user": user.to_dict(),
-            "token": issue_token(user.id),
+            'message': 'Login realizado com sucesso',
+            'user': user.to_dict(),
+            'token': issue_token(user.id),
         }), 200
 
     return bp
