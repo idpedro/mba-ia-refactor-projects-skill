@@ -1,4 +1,5 @@
 @baseUrl = http://localhost:3000
+# Mesmo valor da variável ADMIN_TOKEN usada para subir a API
 @adminToken = troque-este-token
 
 ### Checkout - sucesso

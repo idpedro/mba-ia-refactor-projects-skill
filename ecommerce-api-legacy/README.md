@@ -1,6 +1,6 @@
 # ecommerce-api-legacy
 
-LMS API (com fluxo de checkout) em Node.js/Express usada como entrada do desafio `refactor-arch`.
+LMS API (com fluxo de checkout) em Node.js/Express, refatorada pela skill `refactor-arch` para uma arquitetura em camadas (MVC). O relatório da auditoria está em `reports/audit-project-2.md`.
 
 ## Como rodar
 
@@ -9,38 +9,50 @@ npm install
 ADMIN_TOKEN=troque-este-token npm start
 ```
 
-A aplicação sobe em `http://localhost:3000`. O banco SQLite é em memória e já carrega seeds automaticamente no boot.
+Se o `npm` bloquear o script de instalação do `sqlite3`, rode `npm install-scripts approve sqlite3`. A permissão fica registrada em `allowScripts` no `package.json`.
 
-Variáveis de ambiente (veja `.env.example`):
+A aplicação sobe em `http://127.0.0.1:3000` (somente loopback por padrão). O banco SQLite é em memória e carrega as seeds no boot.
+
+Exemplos de requisições estão em `api.http`.
+
+## Configuração
+
+Todas as variáveis são opcionais; veja `.env.example`.
 
 | Variável | Padrão | Uso |
 |---|---|---|
 | `PORT` | `3000` | Porta HTTP |
-| `DB_PATH` | `:memory:` | Caminho do SQLite |
+| `HOST` | `127.0.0.1` | Interface de escuta. `0.0.0.0` expõe a API na rede |
+| `DB_PATH` | `:memory:` | Caminho do SQLite; um arquivo persiste os dados |
 | `PAYMENT_GATEWAY_KEY` | vazio | Chave do gateway de pagamento |
 | `ADMIN_TOKEN` | vazio | Token das rotas administrativas |
-| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn` ou `error` |
 
-## Autenticação
+## Endpoints
 
-- `POST /api/checkout` é público. Se o e-mail (`eml`) já existir, `pwd` precisa ser a senha da conta (senão `401`). Para um usuário novo, `pwd` é obrigatório.
-- `GET /api/admin/financial-report` e `DELETE /api/users/:id` exigem `Authorization: Bearer <ADMIN_TOKEN>`. Sem token, com token errado, ou com `ADMIN_TOKEN` não definido, a resposta é `401`.
+| Método | Rota | Acesso |
+|---|---|---|
+| `POST` | `/api/checkout` | Público |
+| `GET` | `/api/admin/financial-report` | Admin |
+| `DELETE` | `/api/users/:id` | Admin |
 
-Usuário do seed: `leonan@fullcycle.com.br` / senha `123`.
+As rotas de admin exigem `Authorization: Bearer <ADMIN_TOKEN>`. Sem o header ou com token inválido a resposta é `401`. Com `ADMIN_TOKEN` vazio elas respondem `401` a todos.
 
-Exemplos de requisições estão em `api.http`.
+Erros continuam em texto puro, com os mesmos textos e status de antes (`Bad Request`, `Curso não encontrado`, `Pagamento recusado`). Um erro inesperado responde `500 Erro interno` e o detalhe vai só para o log.
 
 ## Estrutura
 
 ```
 src/
-├── app.js            # composition root
-├── config/           # variáveis de ambiente
-├── database/         # conexão, schema e seed
-├── models/           # acesso a dados por entidade
-├── services/         # pagamento, senha, cache, relatório
-├── controllers/      # casos de uso
-├── validators/       # validação de entrada
-├── routes/           # mapeamento HTTP → controller
-└── middlewares/      # auth de admin, tratamento de erros
+├── app.js                  # composition root
+├── config/index.js
+├── errors.js
+├── database/               # connection (promisificada, com transação), schema, seed
+├── models/                 # user, course, enrollment, payment, auditLog
+├── services/               # password (scrypt), payment, report
+├── controllers/            # checkout, report, user
+├── validators/             # checkout.validator.js
+├── routes/                 # checkout, admin, user
+├── middlewares/            # adminAuth, asyncHandler, errorHandler
+└── utils/logger.js
 ```

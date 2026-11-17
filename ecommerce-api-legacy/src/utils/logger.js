@@ -1,16 +1,22 @@
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
+// Tiny leveled logger over console; no logging dependency needed.
 function createLogger(level = 'info') {
-    const threshold = LEVELS[level] ?? LEVELS.info;
-    const write = (name, method) => (...args) => {
+    const threshold = LEVELS[level] || LEVELS.info;
+
+    const write = (name, message, extra) => {
         if (LEVELS[name] < threshold) return;
-        console[method](`${new Date().toISOString()} ${name.toUpperCase()}`, ...args);
+        const line = `${new Date().toISOString()} ${name.toUpperCase()} ${message}`;
+        const sink = name === 'error' || name === 'warn' ? console.error : console.log;
+        if (extra === undefined) sink(line);
+        else sink(line, extra);
     };
+
     return {
-        debug: write('debug', 'log'),
-        info: write('info', 'log'),
-        warn: write('warn', 'warn'),
-        error: write('error', 'error'),
+        debug: (message, extra) => write('debug', message, extra),
+        info: (message, extra) => write('info', message, extra),
+        warn: (message, extra) => write('warn', message, extra),
+        error: (message, extra) => write('error', message, extra),
     };
 }
 

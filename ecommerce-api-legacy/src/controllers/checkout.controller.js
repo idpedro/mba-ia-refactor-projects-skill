@@ -1,19 +1,19 @@
-const { validateCheckout } = require('../validators/checkout.validator');
-const { NotFoundError, PaymentDeclinedError, UnauthorizedError, ValidationError } = require('../errors');
+const { NotFoundError, PaymentDeniedError } = require('../errors');
 const { PAYMENT_STATUS } = require('../services/payment.service');
+const { validateCheckout } = require('../validators/checkout.validator');
 
 class CheckoutController {
-    constructor({ transaction, userModel, courseModel, enrollmentModel, paymentModel, auditLogModel,
-        paymentService, passwordService, cacheService }) {
-        this.transaction = transaction;
-        this.users = userModel;
+    constructor({ db, courseModel, userModel, enrollmentModel, paymentModel, auditLogModel,
+        paymentService, passwordService, logger }) {
+        this.db = db;
         this.courses = courseModel;
+        this.users = userModel;
         this.enrollments = enrollmentModel;
         this.payments = paymentModel;
         this.auditLogs = auditLogModel;
         this.paymentService = paymentService;
         this.passwordService = passwordService;
-        this.cache = cacheService;
+        this.logger = logger;
     }
 
     async checkout(body) {
@@ -22,28 +22,29 @@ class CheckoutController {
         const course = await this.courses.findActiveById(courseId);
         if (!course) throw new NotFoundError('Curso não encontrado');
 
-        const existingUser = await this.users.findByEmail(email);
-        if (existingUser && !this.passwordService.verify(password, existingUser.pass)) {
-            throw new UnauthorizedError('Credenciais inválidas');
-        }
-        if (!existingUser && !password) throw new ValidationError();
+        // Charge first: a denied card must not leave a user behind.
+        const status = this.paymentService.charge(card);
+        if (status === PAYMENT_STATUS.DENIED) throw new PaymentDeniedError();
 
-        // Decided before any write, so a declined card leaves nothing behind.
-        const status = this.paymentService.charge(card, course.price);
-        if (status !== PAYMENT_STATUS.PAID) throw new PaymentDeclinedError();
+        // Hashed outside the transaction so scrypt never holds the write lock.
+        const passwordHash = password
+            ? await this.passwordService.hash(password)
+            : await this.passwordService.hashUnknownSecret();
 
-        const { userId, enrollmentId } = await this.transaction(async () => {
-            const userId = existingUser
-                ? existingUser.id
-                : await this.users.create({ name, email, passwordHash: this.passwordService.hash(password) });
-            const enrollmentId = await this.enrollments.create(userId, course.id);
-            await this.payments.create(enrollmentId, course.price, status);
-            await this.auditLogs.record(`Checkout curso ${course.id} por ${userId}`);
-            return { userId, enrollmentId };
+        const { userId, enrollmentId } = await this.db.transaction(async (tx) => {
+            const existing = await this.users.findByEmail(email, tx);
+            const id = existing
+                ? existing.id
+                : await this.users.create({ name, email, passwordHash }, tx);
+
+            const enrollment = await this.enrollments.create({ userId: id, courseId }, tx);
+            await this.payments.create({ enrollmentId: enrollment, amount: course.price, status }, tx);
+            await this.auditLogs.record(`Checkout curso ${courseId} por ${id}`, tx);
+            return { userId: id, enrollmentId: enrollment };
         });
 
-        this.cache.set(`last_checkout_${userId}`, course.title);
-        return { enrollmentId };
+        this.logger.info(`Checkout do curso ${courseId} pelo usuário ${userId}`);
+        return { msg: 'Sucesso', enrollment_id: enrollmentId };
     }
 }
 

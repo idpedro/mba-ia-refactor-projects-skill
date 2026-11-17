@@ -1,4 +1,4 @@
-// Domain errors; the error middleware turns them into plain-text responses.
+// Domain errors. The message is the exact plain-text body clients already receive.
 class AppError extends Error {
     constructor(message, status = 500) {
         super(message);
@@ -7,20 +7,20 @@ class AppError extends Error {
     }
 }
 
-class ValidationError extends AppError {
+class BadRequestError extends AppError {
     constructor(message = 'Bad Request') { super(message, 400); }
 }
 
 class UnauthorizedError extends AppError {
-    constructor(message = 'Não autorizado') { super(message, 401); }
+    constructor(message = 'Unauthorized') { super(message, 401); }
 }
 
 class NotFoundError extends AppError {
     constructor(message) { super(message, 404); }
 }
 
-class PaymentDeclinedError extends AppError {
+class PaymentDeniedError extends AppError {
     constructor(message = 'Pagamento recusado') { super(message, 400); }
 }
 
-module.exports = { AppError, ValidationError, UnauthorizedError, NotFoundError, PaymentDeclinedError };
+module.exports = { AppError, BadRequestError, UnauthorizedError, NotFoundError, PaymentDeniedError };

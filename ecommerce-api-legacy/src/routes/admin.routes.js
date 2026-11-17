@@ -1,7 +1,7 @@
 const express = require('express');
 const asyncHandler = require('../middlewares/asyncHandler');
 
-module.exports = (reportController, adminAuth) => {
+function adminRoutes(reportController, adminAuth) {
     const router = express.Router();
 
     router.get('/api/admin/financial-report', adminAuth, asyncHandler(async (req, res) => {
@@ -9,4 +9,6 @@ module.exports = (reportController, adminAuth) => {
     }));
 
     return router;
-};
+}
+
+module.exports = adminRoutes;

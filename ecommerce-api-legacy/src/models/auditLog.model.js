@@ -3,8 +3,9 @@ class AuditLogModel {
         this.db = db;
     }
 
-    record(action) {
-        return this.db.run("INSERT INTO audit_logs (action, created_at) VALUES (?, datetime('now'))", [action]);
+    record(action, executor = this.db) {
+        return executor.run(
+            "INSERT INTO audit_logs (action, created_at) VALUES (?, datetime('now'))", [action]);
     }
 }
 

@@ -1,23 +1,30 @@
 const crypto = require('crypto');
+const { promisify } = require('util');
+
+const scrypt = promisify(crypto.scrypt);
 
 const SALT_BYTES = 16;
 const KEY_LENGTH = 64;
 
-// Salted scrypt hashes stored as "salt:hash" (hex).
+// Salted scrypt, stored as "salt:hash" (both hex).
 class PasswordService {
-    hash(raw) {
+    async hash(raw) {
         const salt = crypto.randomBytes(SALT_BYTES).toString('hex');
-        const hash = crypto.scryptSync(raw, salt, KEY_LENGTH).toString('hex');
-        return `${salt}:${hash}`;
+        const derived = await scrypt(raw, salt, KEY_LENGTH);
+        return `${salt}:${derived.toString('hex')}`;
     }
 
-    verify(raw, stored) {
-        if (typeof raw !== 'string' || typeof stored !== 'string') return false;
-        const [salt, hash] = stored.split(':');
+    async verify(raw, stored) {
+        const [salt, hash] = String(stored || '').split(':');
         if (!salt || !hash) return false;
         const expected = Buffer.from(hash, 'hex');
-        const candidate = crypto.scryptSync(raw, salt, expected.length);
+        const candidate = await scrypt(raw, salt, expected.length);
         return crypto.timingSafeEqual(candidate, expected);
+    }
+
+    // Used for accounts created at checkout without a password: nobody knows it.
+    hashUnknownSecret() {
+        return this.hash(crypto.randomBytes(32).toString('hex'));
     }
 }
 

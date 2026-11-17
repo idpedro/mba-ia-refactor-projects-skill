@@ -1,64 +1,51 @@
 const sqlite3 = require('sqlite3');
 
-// Promise wrapper over a single sqlite3 connection. Every model shares this instance,
-// which matters for ':memory:' databases (each connection is a separate database).
-class Database {
-    constructor(path) {
-        this.db = new sqlite3.Database(path);
-        this.queue = Promise.resolve();
-    }
+const promisifyRun = (db, sql, params) => new Promise((resolve, reject) =>
+    db.run(sql, params, function onRun(err) {
+        if (err) reject(err);
+        else resolve({ lastID: this.lastID, changes: this.changes });
+    }));
 
-    run(sql, params = []) {
-        return new Promise((resolve, reject) => {
-            this.db.run(sql, params, function (err) {
-                if (err) return reject(err);
-                resolve({ lastID: this.lastID, changes: this.changes });
-            });
-        });
-    }
+const promisifyGet = (db, sql, params) => new Promise((resolve, reject) =>
+    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row))));
 
-    get(sql, params = []) {
-        return new Promise((resolve, reject) => {
-            this.db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)));
-        });
-    }
+const promisifyAll = (db, sql, params) => new Promise((resolve, reject) =>
+    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows))));
 
-    all(sql, params = []) {
-        return new Promise((resolve, reject) => {
-            this.db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows)));
-        });
-    }
+// One sqlite connection, promisified. Transactions are serialized through a
+// lock: a single connection cannot hold two BEGIN at once.
+function createConnection(dbPath) {
+    const db = new sqlite3.Database(dbPath);
 
-    exec(sql) {
-        return new Promise((resolve, reject) => {
-            this.db.exec(sql, (err) => (err ? reject(err) : resolve()));
-        });
-    }
+    const executor = {
+        run: (sql, params = []) => promisifyRun(db, sql, params),
+        get: (sql, params = []) => promisifyGet(db, sql, params),
+        all: (sql, params = []) => promisifyAll(db, sql, params),
+    };
 
-    // Transactions are queued so two requests never interleave BEGIN/COMMIT on the shared connection.
-    transaction(work) {
-        const result = this.queue.then(async () => {
-            await this.run('BEGIN');
+    let lock = Promise.resolve();
+
+    // `work` receives the executor to use inside the transaction.
+    const transaction = (work) => {
+        const result = lock.then(async () => {
+            await executor.run('BEGIN');
             try {
-                const value = await work();
-                await this.run('COMMIT');
+                const value = await work(executor);
+                await executor.run('COMMIT');
                 return value;
             } catch (err) {
-                await this.run('ROLLBACK');
+                await executor.run('ROLLBACK');
                 throw err;
             }
         });
-        this.queue = result.catch(() => {});
+        lock = result.catch(() => {});
         return result;
-    }
+    };
 
-    close() {
-        return new Promise((resolve, reject) => this.db.close((err) => (err ? reject(err) : resolve())));
-    }
+    const close = () => new Promise((resolve, reject) =>
+        db.close((err) => (err ? reject(err) : resolve())));
+
+    return { ...executor, transaction, close };
 }
 
-function createConnection(path) {
-    return new Database(path);
-}
-
-module.exports = { Database, createConnection };
+module.exports = { createConnection };

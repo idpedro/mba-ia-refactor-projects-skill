@@ -1,10 +1,10 @@
 class ReportController {
     constructor({ reportService }) {
-        this.reportService = reportService;
+        this.reports = reportService;
     }
 
     financialReport() {
-        return this.reportService.financialReport();
+        return this.reports.financialReport();
     }
 }
 
