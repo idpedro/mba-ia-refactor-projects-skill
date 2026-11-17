@@ -1,5 +1,6 @@
 from src.errors import ValidationError
 
+STATUS_PEDIDO = ("pendente", "aprovado", "enviado", "entregue", "cancelado")
 STATUS_INICIAL = "pendente"
 
 _SELECT_PEDIDOS = """
@@ -15,13 +16,56 @@ class PedidoModel:
     def __init__(self, db):
         self.db = db
 
-    def listar(self, usuario_id=None):
-        sql, params = _SELECT_PEDIDOS, ()
-        if usuario_id is not None:
-            sql += " WHERE p.usuario_id = ?"
-            params = (usuario_id,)
-        rows = self.db.connection.execute(sql + " ORDER BY p.id, i.id", params).fetchall()
+    def criar(self, usuario_id, itens):
+        """Valida preço e estoque e grava pedido, itens e baixa de estoque numa única transação."""
+        conn = self.db.connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            precos, total = {}, 0
+            for item in itens:
+                produto = conn.execute(
+                    "SELECT nome, preco, estoque FROM produtos WHERE id = ?", (item["produto_id"],)
+                ).fetchone()
+                if produto is None:
+                    raise ValidationError(f"Produto {item['produto_id']} não encontrado")
+                if produto["estoque"] < item["quantidade"]:
+                    raise ValidationError(f"Estoque insuficiente para {produto['nome']}")
+                precos[item["produto_id"]] = produto["preco"]
+                total += produto["preco"] * item["quantidade"]
 
+            pedido_id = conn.execute(
+                "INSERT INTO pedidos (usuario_id, status, total) VALUES (?, ?, ?)",
+                (usuario_id, STATUS_INICIAL, total),
+            ).lastrowid
+            for item in itens:
+                conn.execute(
+                    "INSERT INTO itens_pedido (pedido_id, produto_id, quantidade, preco_unitario) VALUES (?, ?, ?, ?)",
+                    (pedido_id, item["produto_id"], item["quantidade"], precos[item["produto_id"]]),
+                )
+                baixa = conn.execute(
+                    "UPDATE produtos SET estoque = estoque - ? WHERE id = ? AND estoque >= ?",
+                    (item["quantidade"], item["produto_id"], item["quantidade"]),
+                )
+                if baixa.rowcount == 0:
+                    raise ValidationError("Estoque insuficiente para o produto " + str(item["produto_id"]))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return {"pedido_id": pedido_id, "total": total}
+
+    def listar_todos(self):
+        rows = self.db.connection().execute(_SELECT_PEDIDOS + " ORDER BY p.id, i.id").fetchall()
+        return self._agrupar(rows)
+
+    def listar_por_usuario(self, usuario_id):
+        rows = self.db.connection().execute(
+            _SELECT_PEDIDOS + " WHERE p.usuario_id = ? ORDER BY p.id, i.id", (usuario_id,)
+        ).fetchall()
+        return self._agrupar(rows)
+
+    @staticmethod
+    def _agrupar(rows):
         pedidos = {}
         for row in rows:
             pedido = pedidos.setdefault(row["id"], {
@@ -41,47 +85,7 @@ class PedidoModel:
                 })
         return list(pedidos.values())
 
-    def criar(self, usuario_id, itens, total):
-        """Grava pedido, itens e baixa de estoque numa única transação.
-
-        `itens` traz produto_id, quantidade, preco_unitario e nome já validados.
-        """
-        conn = self.db.connection
+    def atualizar_status(self, pedido_id, novo_status):
+        conn = self.db.connection()
         with conn:
-            cur = conn.execute(
-                "INSERT INTO pedidos (usuario_id, status, total) VALUES (?, ?, ?)",
-                (usuario_id, STATUS_INICIAL, total),
-            )
-            pedido_id = cur.lastrowid
-            for item in itens:
-                conn.execute(
-                    "INSERT INTO itens_pedido (pedido_id, produto_id, quantidade, preco_unitario) VALUES (?, ?, ?, ?)",
-                    (pedido_id, item["produto_id"], item["quantidade"], item["preco_unitario"]),
-                )
-                baixa = conn.execute(
-                    "UPDATE produtos SET estoque = estoque - ? WHERE id = ? AND estoque >= ?",
-                    (item["quantidade"], item["produto_id"], item["quantidade"]),
-                )
-                if baixa.rowcount == 0:
-                    # Levanta dentro do `with`: a transação inteira é desfeita.
-                    raise ValidationError("Estoque insuficiente para " + item["nome"])
-        return pedido_id
-
-    def atualizar_status(self, pedido_id, status):
-        conn = self.db.connection
-        with conn:
-            cur = conn.execute("UPDATE pedidos SET status = ? WHERE id = ?", (status, pedido_id))
-        return cur.rowcount > 0
-
-    def produto_tem_itens(self, produto_id):
-        row = self.db.connection.execute(
-            "SELECT 1 FROM itens_pedido WHERE produto_id = ? LIMIT 1", (produto_id,)
-        ).fetchone()
-        return row is not None
-
-    def resumo_por_status(self):
-        rows = self.db.connection.execute(
-            "SELECT status, COUNT(*) AS quantidade, COALESCE(SUM(total), 0) AS faturamento "
-            "FROM pedidos GROUP BY status"
-        ).fetchall()
-        return {row["status"]: (row["quantidade"], row["faturamento"]) for row in rows}
+            conn.execute("UPDATE pedidos SET status = ? WHERE id = ?", (novo_status, pedido_id))

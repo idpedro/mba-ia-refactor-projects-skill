@@ -1,6 +1,6 @@
 # code-smells-project
 
-API de E-commerce em Python/Flask usada como entrada do desafio `refactor-arch`.
+API de E-commerce em Python/Flask, refatorada para MVC com a skill `refactor-arch`.
 
 ## Como rodar
 
@@ -9,21 +9,33 @@ pip install -r requirements.txt
 python app.py
 ```
 
-A aplicação sobe em `http://localhost:5000`. O banco SQLite (`loja.db`) é criado automaticamente no primeiro boot, já com produtos e usuários de exemplo. As variáveis de ambiente aceitas estão em `.env.example`.
+A aplicação sobe em `http://127.0.0.1:5000`. O banco SQLite (`loja.db`) é criado no primeiro boot, com produtos e usuários de exemplo. As variáveis de ambiente (todas opcionais) estão em `.env.example`.
 
 ## Autenticação
 
-`POST /login` devolve um `token`; envie-o como `Authorization: Bearer <token>` nas rotas protegidas.
+`POST /login` devolve um `token`; envie-o em `Authorization: Bearer <token>`.
 
-- Públicas: `GET /`, `GET /health`, `POST /login`, `POST /usuarios`, `GET /produtos`, `GET /produtos/busca`, `GET /produtos/<id>`.
-- Autenticada: `POST /pedidos` (o `usuario_id` deve ser o do próprio token, salvo admin).
-- Dono ou admin: `GET /usuarios/<id>`, `GET /pedidos/usuario/<id>`.
-- Somente admin: `POST/PUT/DELETE /produtos`, `GET /usuarios`, `GET /pedidos`, `PUT /pedidos/<id>/status`, `GET /relatorios/vendas`, `POST /admin/reset-db`, `POST /admin/query` (apenas uma instrução `SELECT`, somente leitura).
+| Acesso | Rotas |
+|---|---|
+| Público | `/`, `/health`, `POST /login`, `POST /usuarios`, `GET /produtos`, `GET /produtos/busca`, `GET /produtos/<id>` |
+| Login | `POST /pedidos` (só para o próprio usuário) |
+| Dono ou admin | `GET /usuarios/<id>`, `GET /pedidos/usuario/<id>` |
+| Admin | `GET /usuarios`, `POST/PUT/DELETE /produtos`, `GET /pedidos`, `PUT /pedidos/<id>/status`, `GET /relatorios/vendas`, `POST /admin/reset-db`, `POST /admin/query` (somente `SELECT`) |
 
-Credenciais de desenvolvimento do seed:
+Sem credencial a resposta é `401`; com papel insuficiente, `403`.
 
-| Email | Senha | Tipo |
-|---|---|---|
-| admin@loja.com | admin123 | admin |
-| joao@email.com | 123456 | cliente |
-| maria@email.com | senha123 | cliente |
+Usuários de demonstração (senhas gravadas como hash): `admin@loja.com` / `admin123` (admin), `joao@email.com` / `123456`, `maria@email.com` / `senha123`.
+
+## Estrutura
+
+```
+app.py                     # entry point
+src/app.py                 # create_app(): composition root
+src/config/settings.py     # variáveis de ambiente
+src/database.py            # conexão por requisição, schema, seed
+src/models/                # acesso a dados (SQL parametrizado)
+src/services/              # auth, notificações, relatório
+src/controllers/           # casos de uso e validação
+src/views/                 # blueprints
+src/middlewares/           # auth e tratamento de erros
+```

@@ -1,15 +1,14 @@
 import logging
-import sqlite3
 
-from src.controllers.validators import validar_query
-from src.errors import ValidationError
+from src.controllers.validators import validar_consulta
 
 logger = logging.getLogger(__name__)
 
 
 class SistemaController:
-    def __init__(self, sistema_model, settings):
+    def __init__(self, sistema_model, relatorio_service, settings):
         self.sistema = sistema_model
+        self.relatorios = relatorio_service
         self.settings = settings
 
     def health(self):
@@ -17,18 +16,16 @@ class SistemaController:
             "status": "ok",
             "database": "connected",
             "counts": self.sistema.contagens(),
-            "versao": self.settings.APP_VERSION,
-            "ambiente": self.settings.AMBIENTE,
+            "versao": self.settings["APP_VERSION"],
+            "ambiente": self.settings["ENVIRONMENT"],
         }
+
+    def relatorio_vendas(self):
+        return self.relatorios.vendas()
 
     def resetar_banco(self):
         self.sistema.resetar()
         logger.warning("Banco de dados resetado")
 
-    def executar_query(self, dados):
-        sql = validar_query(dados)
-        try:
-            return self.sistema.consulta_somente_leitura(sql)
-        except sqlite3.Error as err:
-            logger.info("Query administrativa rejeitada: %s", err)
-            raise ValidationError("Query inválida")
+    def executar_consulta(self, dados):
+        return self.sistema.consultar(validar_consulta(dados))

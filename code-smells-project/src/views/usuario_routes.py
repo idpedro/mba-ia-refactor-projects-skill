@@ -11,10 +11,10 @@ def build_usuario_routes(controller):
     def listar_usuarios():
         return jsonify({"dados": controller.listar(), "sucesso": True}), 200
 
-    @bp.get("/usuarios/<int:usuario_id>")
-    @require_self_or_admin("usuario_id")
-    def buscar_usuario(usuario_id):
-        return jsonify({"dados": controller.obter(usuario_id), "sucesso": True}), 200
+    @bp.get("/usuarios/<int:id>")
+    @require_self_or_admin("id")
+    def buscar_usuario(id):
+        return jsonify({"dados": controller.obter(id), "sucesso": True}), 200
 
     @bp.post("/usuarios")
     def criar_usuario():

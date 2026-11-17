@@ -1,11 +1,6 @@
-import logging
-import sqlite3
-
 from flask import Blueprint, jsonify, request
 
 from src.middlewares.auth import require_admin
-
-logger = logging.getLogger(__name__)
 
 
 def build_sistema_routes(controller):
@@ -15,7 +10,7 @@ def build_sistema_routes(controller):
     def index():
         return jsonify({
             "mensagem": "Bem-vindo à API da Loja",
-            "versao": controller.settings.APP_VERSION,
+            "versao": "1.0.0",
             "endpoints": {
                 "produtos": "/produtos",
                 "usuarios": "/usuarios",
@@ -28,11 +23,12 @@ def build_sistema_routes(controller):
 
     @bp.get("/health")
     def health_check():
-        try:
-            return jsonify(controller.health()), 200
-        except sqlite3.Error:
-            logger.exception("Health check falhou")
-            return jsonify({"status": "erro", "detalhes": "Banco de dados indisponível"}), 500
+        return jsonify(controller.health()), 200
+
+    @bp.get("/relatorios/vendas")
+    @require_admin
+    def relatorio_vendas():
+        return jsonify({"dados": controller.relatorio_vendas(), "sucesso": True}), 200
 
     @bp.post("/admin/reset-db")
     @require_admin
@@ -43,7 +39,7 @@ def build_sistema_routes(controller):
     @bp.post("/admin/query")
     @require_admin
     def executar_query():
-        dados = controller.executar_query(request.get_json(silent=True))
+        dados = controller.executar_consulta(request.get_json(silent=True))
         return jsonify({"dados": dados, "sucesso": True}), 200
 
     return bp

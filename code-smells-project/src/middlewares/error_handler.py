@@ -20,4 +20,4 @@ def register_error_handlers(app):
     @app.errorhandler(Exception)
     def handle_unexpected(err):
         logger.exception("Erro não tratado")
-        return jsonify({"erro": "Erro interno do servidor", "sucesso": False}), 500
+        return jsonify({"erro": "Erro interno", "sucesso": False}), 500

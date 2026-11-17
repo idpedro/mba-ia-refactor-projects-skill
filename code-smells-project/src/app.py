@@ -14,6 +14,7 @@ from src.models.pedido_model import PedidoModel
 from src.models.produto_model import ProdutoModel
 from src.models.sistema_model import SistemaModel
 from src.models.usuario_model import UsuarioModel
+from src.services.auth_service import AuthService
 from src.services.notification_service import NotificationService
 from src.services.relatorio_service import RelatorioService
 from src.views.pedido_routes import build_pedido_routes
@@ -23,32 +24,29 @@ from src.views.usuario_routes import build_usuario_routes
 
 
 def create_app(settings=Settings):
-    logging.basicConfig(
-        level=settings.LOG_LEVEL,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    logging.basicConfig(level=settings.LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     app = Flask(__name__)
     app.config.from_object(settings)
     CORS(app, origins=settings.CORS_ORIGINS)
 
     db = Database(settings.DATABASE_PATH)
-    db.init_app(app)
+    db.init_schema()
+    app.teardown_appcontext(db.close)
 
-    produto_model = ProdutoModel(db)
-    usuario_model = UsuarioModel(db)
-    pedido_model = PedidoModel(db)
-    sistema_model = SistemaModel(db)
-    app.extensions["usuario_model"] = usuario_model
+    produtos = ProdutoModel(db)
+    usuarios = UsuarioModel(db)
+    pedidos = PedidoModel(db)
+    sistema = SistemaModel(db)
+    app.extensions["usuario_model"] = usuarios
 
-    notification_service = NotificationService()
-    relatorio_service = RelatorioService(pedido_model)
+    auth = AuthService(usuarios)
+    notificacoes = NotificationService()
+    relatorios = RelatorioService(sistema)
 
-    app.register_blueprint(build_produto_routes(ProdutoController(produto_model, pedido_model)))
-    app.register_blueprint(build_usuario_routes(UsuarioController(usuario_model)))
-    app.register_blueprint(build_pedido_routes(
-        PedidoController(pedido_model, produto_model, notification_service), relatorio_service))
-    app.register_blueprint(build_sistema_routes(SistemaController(sistema_model, settings)))
-
+    app.register_blueprint(build_produto_routes(ProdutoController(produtos)))
+    app.register_blueprint(build_usuario_routes(UsuarioController(usuarios, auth)))
+    app.register_blueprint(build_pedido_routes(PedidoController(pedidos, notificacoes)))
+    app.register_blueprint(build_sistema_routes(SistemaController(sistema, relatorios, app.config)))
     register_error_handlers(app)
     return app

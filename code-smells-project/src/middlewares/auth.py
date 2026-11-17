@@ -16,17 +16,23 @@ def issue_token(usuario_id):
 
 
 def _usuario_atual():
-    header = request.headers.get("Authorization", "")
-    if not header.startswith("Bearer "):
+    cabecalho = request.headers.get("Authorization", "")
+    if not cabecalho.startswith("Bearer "):
         raise UnauthorizedError("Token ausente")
     try:
-        dados = _serializer().loads(header[7:], max_age=current_app.config["TOKEN_MAX_AGE"])
+        dados = _serializer().loads(cabecalho[7:], max_age=current_app.config["TOKEN_MAX_AGE"])
     except (BadSignature, SignatureExpired):
         raise UnauthorizedError("Token inválido")
     usuario = current_app.extensions["usuario_model"].buscar_por_id(dados["uid"])
     if usuario is None:
         raise UnauthorizedError("Token inválido")
     return usuario
+
+
+def autorizar_dono_ou_admin(usuario_id):
+    usuario = g.current_user
+    if usuario["id"] != usuario_id and usuario["tipo"] != TIPO_ADMIN:
+        raise ForbiddenError("Acesso negado")
 
 
 def require_auth(view):
@@ -52,8 +58,7 @@ def require_self_or_admin(param):
         @wraps(view)
         def wrapper(*args, **kwargs):
             g.current_user = _usuario_atual()
-            if g.current_user["id"] != kwargs[param] and g.current_user["tipo"] != TIPO_ADMIN:
-                raise ForbiddenError("Acesso negado")
+            autorizar_dono_ou_admin(kwargs[param])
             return view(*args, **kwargs)
         return wrapper
     return decorator
