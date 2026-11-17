@@ -262,27 +262,62 @@ For Flask-SQLAlchemy, `db = SQLAlchemy()` plus `db.init_app(app)` inside `create
 
 ---
 
-## P-08 Replace mutable global state
+## P-08 Eliminate in-process state
 Fixes AP-09.
+
+State is any mutable collection or counter that outlives a single request: module-level variables, and collections held by an object that lives for the whole process (anything built once in the composition root and injected). Moving the collection into a class and injecting one instance leaves AP-09 in place: the data is still lost on restart, grows without bound, and differs per worker.
+
+**Decide by readers.** Before changing anything, find every read of the state (`grep` the attribute or variable name across the project):
+
+| What reads it | Fix |
+|---|---|
+| Nothing reads it (write-only cache, history no route or rule consults) | Delete the state and every write to it. Keep the real side effect (send the email, create the enrollment) and keep a log line if someone may want the trail. |
+| A route or business rule reads it across requests | Persist it: a table with its schema, a model, and the reads going through the model. Prefer deriving the value from tables that already exist when they hold the same facts (the "last checkout" of a user is the newest enrollment). |
+| Only the function that builds it (a `Map` grouping rows inside one call) | Not state; leave it. |
+
+A shared database connection is the other common case: replace `global db_connection` with a connection per request (`flask.g` + teardown) or a `Database` object created in the composition root that hands out connections; the object holds configuration, not request data.
 
 **Before**
 ```js
+// utils.js
 let globalCache = {};
 function logAndCache(key, data) { globalCache[key] = data; }
-module.exports = { globalCache, totalRevenue };
+module.exports = { globalCache, logAndCache };
 ```
-**After**
+```python
+class AuditService:
+    def __init__(self):
+        self.events = []
+
+    def record(self, user_id, action):
+        self.events.append({"user_id": user_id, "action": action, "at": utcnow()})
+```
+**After**: nothing reads `globalCache`, so it is deleted
 ```js
-// src/services/cache.service.js
-class CacheService {
-  constructor() { this.store = new Map(); }
-  set(key, value) { this.store.set(key, value); }
-  get(key) { return this.store.get(key); }
-}
-module.exports = CacheService;
-// one instance created in app.js and injected where needed
+// checkout.controller.js: the cache write is gone; the side effect stays
+const enrollmentId = await this.enrollments.create(userId, courseId);
+this.logger.info(`Checkout do curso ${courseId} pelo usuário ${userId}`);
 ```
-Python: replace `global db_connection` with a `Database` object created in `create_app()` and passed to models; replace in-memory lists used as storage with a table, or keep them on an injected instance when persistence is out of scope.
+**After**: `GET /audit` reads the events, so they move to a table
+```python
+class AuditEvent(db.Model):
+    __tablename__ = "audit_events"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    action = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
+
+class AuditService:
+    def record(self, user_id, action):
+        db.session.add(AuditEvent(user_id=user_id, action=action))
+        db.session.commit()
+
+    def for_user(self, user_id):
+        return AuditEvent.query.filter_by(user_id=user_id).order_by(AuditEvent.created_at).all()
+```
+Raw-SQL projects add the `CREATE TABLE IF NOT EXISTS` next to the existing schema and a model module with parameterized queries (P-02).
+
+Validation: re-run the AP-09 grep from `anti-patterns.md`; every remaining hit is either deleted or a local variable inside one function call.
 
 ---
 

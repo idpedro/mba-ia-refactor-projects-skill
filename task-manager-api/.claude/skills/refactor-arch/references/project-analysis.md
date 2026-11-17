@@ -80,8 +80,9 @@ Used by Phase 3 to boot the app and capture the baseline. Keep environments outs
 | Stack | Install | Boot |
 |---|---|---|
 | Python | `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt` (`.venv/` is gitignored) | the command from the project README, typically `.venv/bin/python app.py` |
-| Node | `npm install` | `npm start` |
+| Node | `npm install` (see the note below on blocked install scripts) | `npm start` |
 
+- npm 11+ can block dependency install scripts (`npm warn install-scripts ... blocked`). When a native dependency the app needs did not build (e.g. `sqlite3` fails to load), run `npm install-scripts approve <pkg>`: it records an `allowScripts` entry in `package.json` (ignored by older npm), so a fresh clone installs too. Keep that entry in the refactored project.
 - Run the server in the background, wait until the port answers (`curl -s -o /dev/null localhost:<port>/` in a short retry loop), then send requests.
 - Port: read it from the code. If it is taken, stop your own earlier server first; check with `ss -ltnp | grep <port>`.
 - Payloads: reuse `api.http`, README examples or seed data when present. Otherwise craft the smallest valid body from the handler's validation code. Hit each endpoint once with a valid request; for create endpoints also note the created id so later requests (GET by id, PUT, DELETE) target real rows.

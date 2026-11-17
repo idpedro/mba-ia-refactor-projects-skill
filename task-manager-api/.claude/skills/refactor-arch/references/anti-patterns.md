@@ -58,9 +58,9 @@ When one site matches two entries, report it under the more severe one and menti
 - **Fix**: P-07.
 
 ### AP-09 Mutable global state
-- **Signals**: module-level variables mutated at runtime: `global x`, `let cache = {}` / `let total = 0` exported and written, a shared connection with `check_same_thread=False`, in-memory lists on a service instance (`self.notifications = []`) acting as storage.
-- `grep -nE "^\s*global |^let |^var " -r .`
-- **Fix**: P-08.
+- **Signals**: module-level variables mutated at runtime: `global x`, `let cache = {}` / `let total = 0` exported and written; a shared connection with `check_same_thread=False`; collections held by an object that lives for the whole process (a service built once and injected) and written per request: `self.notifications = []`, `this.store = new Map()`. Moving such a collection into an injected instance is still this anti-pattern.
+- `grep -rnE "^(let|var) |^\s*global |self\.[a-z_]+ = (\[\]|\{\}|set\(\)|dict\(\)|list\(\))|this\.[a-zA-Z_]+ = (new (Map|Set)\(|\{\}|\[\])" --include='*.py' --include='*.js' --exclude-dir=node_modules --exclude-dir=.venv .` and read each hit: a collection that only lives inside one function call is not state.
+- **Fix**: P-08: delete the state when nothing reads it, persist it in a table when something does. The finding is resolved only when the grep has no remaining hit of this kind.
 
 ### AP-10 Non-atomic multi-step writes and orphaned data
 - **Signals**: several dependent `INSERT`/`UPDATE`/`DELETE` statements with no transaction (an order inserted, then items, then stock in separate commits; enrollment then payment in nested callbacks); a validation loop that returns mid-way after some writes; deleting a parent row while children stay (`DELETE FROM users` leaving enrollments/payments, or a response that admits "ficaram sujos"); stock decremented without re-checking it inside the same transaction.
