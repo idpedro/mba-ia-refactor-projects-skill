@@ -137,7 +137,7 @@ function verifyPassword(raw, stored) {
   return crypto.timingSafeEqual(candidate, Buffer.from(hash, 'hex'));
 }
 ```
-Login by plaintext comparison in SQL (`WHERE email = ? AND senha = ?`) becomes: fetch by email, then `check_password`. Hash seed passwords at seed time. Existing persisted hashes stop matching: re-seed, or keep a legacy-format fallback, per the approved decision.
+Login by plaintext comparison in SQL (`WHERE email = ? AND senha = ?`) becomes: fetch by email, then `check_password`. Hash seed passwords at seed time. Existing persisted hashes stop matching: re-seed, or keep a legacy-format fallback, per the approved decision. A legacy fallback or a boot-time re-hash never keeps a known default: accounts that came from the original seed (the literal passwords the audit found) get the new environment or generated password, and the boot log says so.
 
 ---
 
@@ -535,7 +535,7 @@ def validar_produto(dados):
         "categoria": dados.get("categoria", "geral"),
     }
 ```
-Both create and update call `validar_produto`, keeping the original messages so error bodies match the baseline. Uniqueness belongs to the database: a unique index (case-insensitive for emails, e.g. `COLLATE NOCASE` or a normalised lowercase column), with the constraint violation mapped to `409`; a `SELECT` before the `INSERT` is only a friendlier message, never the guarantee. For serialization, the model's `to_dict()` is the single source; routes stop building dicts by hand and add computed fields (`overdue`) from a model method:
+Both create and update call `validar_produto`, keeping the original messages so error bodies match the baseline. Uniqueness belongs to the database: a unique index (case-insensitive for emails, e.g. `COLLATE NOCASE` or a normalised lowercase column), with the constraint violation mapped to `409`; a `SELECT` before the `INSERT` is only a friendlier message, never the guarantee. ORMs create indexes only for new tables (`create_all()` leaves existing ones alone), so also run the index statement idempotently at boot (`CREATE UNIQUE INDEX IF NOT EXISTS ...`). Numeric inputs must be finite: reject `NaN` and `Infinity` (`math.isfinite`, `Number.isFinite`) along with wrong types and out-of-range values. For serialization, the model's `to_dict()` is the single source; routes stop building dicts by hand and add computed fields (`overdue`) from a model method:
 ```python
 def to_dict(self, include_overdue=False):
     data = {...}

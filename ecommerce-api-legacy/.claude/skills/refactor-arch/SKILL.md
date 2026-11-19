@@ -40,7 +40,8 @@ Done when every catalog entry has been checked against every file, every finding
 5. **Validate** against the baseline, on a fresh database:
    - the app boots with the project's original start command and **no environment variables set**, no errors in the log. Every check below runs against this same no-variable boot; take seeded passwords from what the boot or seed step printed instead of setting variables;
    - every endpoint returns the baseline status code and response keys (sending credentials where the route now requires them), or differs only as an approved decision;
-   - every check in every finding's `Verification:` line passes. Run them for real (requests with each identity the check names, queries on the stored data, restarts, greps) and record the command and its result for each.
+   - every check in every finding's `Verification:` line passes. Run them for real (requests with each identity the check names, queries on the stored data, restarts, greps) and record the command and its result for each;
+   - **upgrade path**: when the project persists data in a file or server database, create a database with the *original* code (its boot or seed step, into a scratch copy), boot the refactored app on it with no environment variables, and re-run the checks of every finding about stored data (credentials, uniqueness, integrity, schema). They must pass there too: the refactored app migrates existing databases at boot (idempotent schema changes such as `CREATE UNIQUE INDEX IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN`) and replaces known default credentials instead of carrying them over.
 6. **Clean up**: stop every server you started; delete runtime artefacts the validation created (database files, `__pycache__`), leaving only files that belong in the repo.
 7. Print the `PHASE 3: REFACTORING COMPLETE` block from `mvc-guidelines.md`.
 

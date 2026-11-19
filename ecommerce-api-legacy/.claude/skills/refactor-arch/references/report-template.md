@@ -19,7 +19,8 @@ Phase 2 prints this verbatim structure. Phase 3 step 1 saves the same text to `r
 - Cover every harm the Impact names, in the conditions it happens: if it can happen under concurrency or with input variants (two simultaneous sign-ups, the same email in another case, a double submit), the check sends exactly that. If the Impact says users can "read, change, reassign and delete" others' data, there is one check for each verb.
 - Name the identity for every HTTP check: anonymous, regular user, a *different* regular user, admin. Access findings always include the case "user A acting on user B's record".
 - Prefer behaviour over code shape: a request and its expected status and body, a query on the stored value, a restart, a forced failure mid-write, a count of queries, the address the server listens on. A grep that must return no hits is enough only for findings about code shape (dead imports, naming, magic numbers, deprecated calls).
-- Write each check so anyone can run it: `METHOD path` + identity + body → expected result; `SQL` → expected value; `grep -nE "<pattern>" <paths>` → no hits.
+- Write each check so anyone can run it: `METHOD path` + identity + body → expected result; `SQL` → expected value; `grep -nE "<pattern>" <paths>` → no hits. Run every grep exactly as written before putting it in the report: it must return no hits on correct code (use word boundaries, `\bprint\(` rather than `print(`, which also matches `Blueprint(`).
+- Findings about stored data (credentials, uniqueness, integrity) also name the upgrade-path check: the same check on a database created by the original code.
 
 Examples by catalog entry (adapt names and routes to the project):
 
