@@ -646,7 +646,7 @@ The guard is on in the default configuration. No environment variable switches i
 - Public: login, sign-up, health/index, and read-only catalog listings meant for anonymous visitors (e.g. `GET /produtos`).
 - Authenticated: everything else that reads or changes data.
 - Owner or admin: routes scoped to one user (`/usuarios/<id>`, `/pedidos/usuario/<id>`, `/users/<user_id>`), and every write (`PUT`, `PATCH`, `DELETE`) on a record that belongs to a user (a task's `user_id`, an order's `usuario_id`). Reading shared lists may stay open to any authenticated user; changing someone else's record may not.
-- The owner comes from the token. On create, a non-admin's record is owned by the caller: a body that names another owner gets `403`, and a body with no owner gets the caller. On update, a non-admin cannot change the owner field. A user can always edit and delete the records they created. Admins may set any owner.
+- The owner comes from the token. On create, a non-admin's record is owned by the caller: a body that names another owner gets `403` (never a silent switch to the caller), and a body with no owner gets the caller. On update, a non-admin cannot change the owner field. A user can always edit and delete the records they created. Admins may set any owner.
 - Every route that filters by owner (`/users/<id>/tasks`, `?user_id=` on a search) applies the same rule, so the restriction cannot be bypassed through another route.
 - Admin only: listings of every user or order, status changes, reports, destructive and admin routes.
 - `401` when the token is missing or invalid, `403` when the user lacks the role or ownership. Both go through the central error handler (P-10).

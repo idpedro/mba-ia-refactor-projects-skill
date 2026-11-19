@@ -84,8 +84,8 @@ List each refactor whose effect a client can observe, with the default you will 
 - An endpoint that executes SQL or code from the request, or wipes data: keep the route and require the admin role (P-16); anonymous requests get `401`, authenticated non-admins `403`. Free-form SQL or code from the request is never executed, not even for admins: the route runs only queries from a fixed allow-list (P-05).
 - Authentication (P-16): the public routes (login, sign-up, health/index, public catalog reads), how clients get a token, and which routes need the admin role or ownership. Enforcement is on by default; this decision shapes it and never turns it off.
 - Password hash format changing (existing stored passwords stop matching unless re-seeded or verified with a legacy fallback).
-- Seeded accounts: their passwords come from environment variables named in `.env.example` (or are generated and printed once by the seed step), never from literals in code or docs.
-- Error handling centralised: keep the body format and messages clients already receive; only leaks and inconsistencies change.
+- Seeded accounts: their passwords come from environment variables named in `.env.example`, or are generated and printed once by the seed step when unset; never literals in code or docs. The app still boots with no variable set (see SKILL.md, Phase 2 step 6).
+- Error handling centralised: keep the body format and messages clients already receive (plain text stays plain text, JSON keeps its keys); only leaks and inconsistencies change.
 - Request or response field renames (default: keep the original names).
 
 An empty list is printed as `1. None — the refactor preserves every observable response.`
