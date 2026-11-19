@@ -81,6 +81,7 @@ Used by Phase 3 to boot the app and capture the baseline. Keep environments outs
 |---|---|---|
 | Python | `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt` (`.venv/` is gitignored) | the command from the project README, typically `.venv/bin/python app.py` |
 | Node | `npm install` (see the note below on blocked install scripts) | `npm start` |
+| Other | the manifest's install command (`pip install -e .`, `bundle install`, `mvn package`, `go build`) | the command from the README, or the framework's documented run command |
 
 - npm 11+ can block dependency install scripts (`npm warn install-scripts ... blocked`). When a native dependency the app needs did not build (e.g. `sqlite3` fails to load), run `npm install-scripts approve <pkg>`: it records an `allowScripts` entry in `package.json` (ignored by older npm), so a fresh clone installs too. Keep that entry in the refactored project.
 - Run the server in the background, wait until the port answers (`curl -s -o /dev/null localhost:<port>/` in a short retry loop), then send requests.

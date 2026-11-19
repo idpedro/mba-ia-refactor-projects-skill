@@ -2,7 +2,9 @@
 
 Phase 2 applies every entry below to every inventoried file. Each entry: severity, detection signals (concrete, grep-able where possible), and the playbook pattern that fixes it (`P-xx` in `refactoring-playbook.md`).
 
-The grep hints are starting points; confirm every hit by reading the surrounding code, and look for the same shape in idioms the hint misses.
+The grep hints are starting points; confirm every hit by reading the surrounding code, and look for the same shape in idioms the hint misses. Pass the pattern to `grep -rnE` (`-rnEi` where noted) with `--include='*.py' --include='*.js'` (plus the project's other source extensions) and `--exclude-dir` for `node_modules`, `.venv`, `.claude`, quoting it for your shell. Read every hit: the pattern finds candidates, the code decides.
+
+The signals use Flask and Express examples. In another stack, look for the same shape in that framework's idioms, and report only what the project actually lacks: a missing `create_app` is not a finding in a framework whose settings and URL configuration already play the composition-root role (Django, Rails, Spring).
 
 ## Severity scale
 
@@ -11,7 +13,7 @@ The grep hints are starting points; confirm every hit by reading the surrounding
 - **MEDIUM**: standardisation, duplication, moderate performance: N+1 queries, missing validation, scattered error handling, deprecated APIs.
 - **LOW**: readability: naming, magic numbers, dead imports, print-debugging.
 
-When one site matches two entries, report it under the more severe one and mention the other in its Description.
+When one site matches two entries, report one finding per entry (the same lines may appear in both), so each entry's fix is planned and verified on its own.
 
 ---
 
@@ -19,14 +21,22 @@ When one site matches two entries, report it under the more severe one and menti
 
 ### AP-01 Hardcoded credentials and secrets
 - **Signals**: string literals assigned to names like `SECRET_KEY`, `password`, `pass`, `pwd`, `api_key`, `token`, `gatewayKey`, `smtp`, `dbPass`; literals starting `pk_live_`, `sk_`, `AKIA`; connection strings with `user:pass@`; config objects of literals in source.
-- `grep -nEi "(secret|passw|pwd|api_?key|token|_key)\s*[:=]\s*['\"]" -r .`
+- Also secrets that only moved: a config module whose env lookup falls back to a literal secret (`os.environ.get("SECRET_KEY", "dev")`, `process.env.API_KEY || 'pk_live...'`), and passwords written as literals in seed or sample data (`("Admin", "admin@x.com", "admin123")`, `set_password('1234')`, `hash('123')`).
+- Pattern (`-rnEi`):
+  ```
+  (secret|passw|pwd|senha|api_?key|gateway_?key|token|dbpass)[A-Za-z_]*[]"']*\s*[:=]\s*["'][^"']{3,}|(environ\.get|getenv)\(\s*["'][A-Z_]*(SECRET|PASSWORD|PASS|KEY|TOKEN)["']\s*,\s*["'][^"']+|process\.env\.[A-Z_]*(SECRET|PASSWORD|PASS|KEY|TOKEN)\s*(\|\||\?\?)\s*["'][^"']+|(set_password|generate_password_hash|hash_?password|[.]hash)\(\s*["'][^"']+["']\s*\)|["'][^"' ]+@[^"' ]+["']\s*,\s*["'][^"']{3,}["']
+  ```
 - **Also**: a secret echoed back in a response (`"secret_key": ...` in a health check) is the same finding, raised.
-- **Fix**: P-01.
+- **Fix**: P-01 for config, P-16 for seeded accounts. The finding is resolved when the pattern has no hit left and no response or log shows the value.
 
 ### AP-02 SQL injection
 - **Signals**: a query string built by concatenation or interpolation with any value that can come from a request: `"... WHERE id = " + str(id)`, `f"SELECT ... {x}"`, `` `SELECT ... ${x}` ``, `"... LIKE '%" + termo + "%'"`, `.format(` on SQL. Includes values cast with `str()`: casting does not sanitise.
-- `grep -nE "(execute|query|run|get|all)\(\s*[\"'f\`].*(\+|\{|\$\{)" -r .` and `grep -nE "(SELECT|INSERT|UPDATE|DELETE).*\" *\+" -r .`
-- **Fix**: P-02.
+- Pattern (`-rnE`, case-sensitive so SQL keywords stay uppercase):
+  ```
+  (SELECT|INSERT|UPDATE|DELETE|WHERE|LIKE|VALUES|SET)\b[^#]*["'`] *(\+|% *[(a-z]|\.format\()|f["'][^"']*(SELECT|INSERT|UPDATE|DELETE|WHERE)[^"']*\{|`[^`]*(SELECT|INSERT|UPDATE|DELETE|WHERE)[^`]*\$\{|text\(f["']
+  ```
+  An f-string or template that only joins fixed clause text while every value goes through bound parameters is safe (P-02); say so when you read such a hit.
+- **Fix**: P-02. The finding is resolved when every hit is either gone or a fixed-text join, and the injection payloads in its Verification return nothing extra.
 
 ### AP-03 God class / God module
 - **Signals**: one class or file that does three or more of: register routes, open the DB connection, create schema, run queries, apply business rules, format responses, call external services. A file over ~300 lines spanning several domains (products + users + orders). A class named `*Manager`, `*Handler`, `App*` with a `setupRoutes`-style method and SQL in its body.
@@ -34,7 +44,8 @@ When one site matches two entries, report it under the more severe one and menti
 
 ### AP-04 Unprotected destructive or arbitrary-execution endpoint
 - **Signals**: a route that executes SQL/code taken from the request body (`cursor.execute(dados["sql"])`, `eval`, `exec`); a route that wipes tables (`/admin/reset-db`, `DELETE FROM` with no `WHERE`) reachable with no authentication check.
-- **Fix**: P-05 (removal or guard is a Phase 2 **decision**).
+- Also: the same route after a refactor that still runs request-supplied SQL or code, even for admins only or on a read-only connection.
+- **Fix**: P-05 + P-16. The route stays and requires the admin role; SQL or code text from the request is never executed. A query endpoint runs only entries of a fixed allow-list of parameterized read queries that leave out credential columns; anything else gets `400`. A destructive endpoint keeps its effect for admins only.
 
 ### AP-05 Plaintext or weak password storage
 - **Signals**: password columns written straight from the request; `md5`, `sha1` without salt, `base64`, home-made loops (`badCrypto`) used as hashing; login implemented as `WHERE email = ? AND senha = ?` against the raw value; seed data with literal passwords stored as is.
@@ -59,7 +70,11 @@ When one site matches two entries, report it under the more severe one and menti
 
 ### AP-09 Mutable global state
 - **Signals**: module-level variables mutated at runtime: `global x`, `let cache = {}` / `let total = 0` exported and written; a shared connection with `check_same_thread=False`; collections held by an object that lives for the whole process (a service built once and injected) and written per request: `self.notifications = []`, `this.store = new Map()`. Moving such a collection into an injected instance is still this anti-pattern.
-- `grep -rnE "^(let|var) |^\s*global |self\.[a-z_]+ = (\[\]|\{\}|set\(\)|dict\(\)|list\(\))|this\.[a-zA-Z_]+ = (new (Map|Set)\(|\{\}|\[\])" --include='*.py' --include='*.js' --exclude-dir=node_modules --exclude-dir=.venv .` and read each hit: a collection that only lives inside one function call is not state.
+- Pattern (`-rnE`):
+  ```
+  ^(const|let|var) [A-Za-z_$]+ = (\{\}|\[\]|0|new (Map|Set)\()|^(let|var) |^\s*global |^[A-Za-z_][A-Za-z0-9_]* *(: *[^=]+)?= *(\[\]|\{\}|set\(\)|dict\(\)|defaultdict\(|deque\()|self\.[a-z_]+ *(: *[^=]+)?= *(\[\]|\{\}|set\(\)|dict\(\)|list\(\)|defaultdict\(|deque\()|this\.[a-zA-Z_]+ = (new (Map|Set)\(|\{\}|\[\])
+  ```
+  It covers module-level collections and counters (`const cache = {}`, `store = {}`, `defaultdict(...)`), class- and instance-level collections (`self.items: list = []`, `this.store = new Map()`) and `global`. A collection that only lives inside one function call is not state.
 - **Fix**: P-08: delete the state when nothing reads it, persist it in a table when something does. The finding is resolved only when the grep has no remaining hit of this kind.
 
 ### AP-10 Non-atomic multi-step writes and orphaned data
@@ -67,8 +82,8 @@ When one site matches two entries, report it under the more severe one and menti
 - **Fix**: P-11.
 
 ### AP-11 Missing authentication / authorization
-- **Signals**: admin or destructive routes with no auth check; routes that list or change users, orders or other per-user data reachable anonymously (`GET /usuarios`, `PUT /pedidos/<id>/status`); fake tokens (`'fake-jwt-token-' + id`); role taken from the request body on user creation (`role = data.get('role')` letting anyone self-register as admin); any client able to change another user's data; an auth guard that exists but is disabled by default (`AUTH_REQUIRED=0`).
-- **Fix**: P-16, enforced by default. The Phase 2 decision covers which routes stay public and how clients authenticate; enforcement itself is never optional.
+- **Signals**: admin or destructive routes with no auth check; routes that list or change users, orders or other per-user data reachable anonymously (`GET /usuarios`, `PUT /pedidos/<id>/status`); fake tokens (`'fake-jwt-token-' + id`); role taken from the request body on user creation (`role = data.get('role')` letting anyone self-register as admin); the owner of a new or updated record taken from the request body (`user_id`/`usuario_id` in a create or update payload) so anyone can create, reassign or orphan records in someone else's name; any client able to read or change another user's data; an auth guard that exists but is disabled by default (`AUTH_REQUIRED=0`).
+- **Fix**: P-16, enforced by default. The Phase 2 decision covers which routes stay public and how clients authenticate; enforcement itself is never optional, and the owner of a record always comes from the token unless the caller is an admin.
 
 ### AP-12 Debug mode and unsafe defaults in the entry point
 - **Signals**: `debug=True` / `DEBUG = True` combined with `host="0.0.0.0"` (the Werkzeug debugger allows remote code execution); `CORS(app)` with no origin list; config values that should differ per environment written as literals.
@@ -110,10 +125,15 @@ Flag every use and recommend the modern equivalent. Check the installed framewor
 | `req.param('x')` | `req.params.x` / `req.query.x` / `req.body.x` | Removed in Express 5 |
 | `res.send(status)`, `res.json(status, body)` | `res.status(code).send(...)` / `.json(...)` | Removed in Express 5 |
 | `app.del(...)` | `app.delete(...)` | Removed in Express 5 |
-| callback-style DB APIs nested 3+ levels | `async/await` over a promisified driver | Not removed, but superseded; report with AP-10 or AP-16 when it hides bugs |
+| callback-style DB APIs nested 3+ levels | `async/await` over a promisified driver | Not removed, but superseded |
 | `var` | `const` / `let` | Legacy JS |
 
-- `grep -nE "utcnow|\.query\.get\(|before_first_request|new Buffer|body-parser|req\.param\(|app\.del\(" -r .`
+Report deprecated calls as their own AP-17 finding, even when the same code also appears under AP-10 or AP-16.
+
+- Pattern (`-rnE`):
+  ```
+  datetime\.utcnow|datetime\.utcfromtimestamp|default=datetime\.utcnow|\.query\.get(_or_404)?\(|before_first_request|json_encoder|JSONEncoder|from flask import[^#]*\b(escape|Markup)\b|new Buffer\(|body-parser|req\.param\(|app\.del\(|res\.(json|send)\([0-9]+,|^\s*var 
+  ```
 
 ### AP-18 Configuration in code instead of a config module
 - **Signals**: DB path, port, URLs, SMTP host, feature flags as literals spread across modules (`db_path = "loja.db"`, `port: 3000` inside a utils file, `'sqlite:///tasks.db'` in `app.py`). Distinct from AP-01: these are not secrets, but they block per-environment configuration.
@@ -128,8 +148,8 @@ Flag every use and recommend the modern equivalent. Check the installed framewor
 - **Fix**: P-14.
 
 ### AP-20 Poor naming
-- **Signals**: one- or two-letter names for domain values (`u`, `e`, `p`, `cc`, `cid`, `t`, `c`, `d`), cryptic request fields (`usr`, `eml`, `pwd`, `c_id`), misleading names (`badCrypto`, `logAndCache` doing two things), `cursor2`/`cursor3`, mixed languages within one module.
-- **Fix**: P-14 (rename internals freely; renaming request/response fields is a contract change and needs a **decision**).
+- **Signals**: one- or two-letter names for domain values (`u`, `e`, `p`, `cc`, `cid`, `t`, `c`, `d`), misleading names (`badCrypto`, `logAndCache` doing two things), `cursor2`/`cursor3`, mixed languages within one module. Public request and response field names (`usr`, `eml`) are part of the API contract, not this finding; the internal variables that receive them are.
+- **Fix**: P-14.
 
 ### AP-21 Unused imports and dead code
 - **Signals**: imported names never referenced (`import os, sys, json, time` with none used; `totalRevenue` exported and never read); functions or services never called; commented-out blocks.

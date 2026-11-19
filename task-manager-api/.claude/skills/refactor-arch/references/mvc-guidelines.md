@@ -55,6 +55,10 @@ Name modules after the project's domain (`produto_model.py`, `course.model.js`) 
     └── middlewares/errorHandler.js
 ```
 
+### Other stacks
+
+For a stack without a layout above, keep the same layer responsibilities and use the framework's own structure: Django apps (`models.py`, `views.py` as controllers, `urls.py` as the route table, `settings.py` as config), FastAPI routers with dependency injection, Spring `@Controller`/`@Service`/`@Repository`, Rails MVC folders. Do not add an app factory or composition root a framework already provides another way; boot with the framework's documented run command.
+
 ### Already partially layered projects
 
 Keep what is sound; move what leaks. Typical moves:
@@ -70,7 +74,7 @@ Keep the original module paths importable when other scripts depend on them (e.g
 
 - **Contract preserved**: same paths, methods, status codes, request fields and response keys as the baseline, except approved decisions.
 - **Entry point clear**: the original start command boots the refactored app.
-- **Config externalized**: secrets come only from the environment; provide `.env.example` listing every variable. Non-secret defaults (port, db path) may have in-code defaults inside the config module only.
+- **Config externalized**: secrets and seeded passwords come only from the environment, with no literal fallback; provide `.env.example` listing every variable. Non-secret defaults (port, db path) may have in-code defaults inside the config module only.
 - **Error handling centralized**: one handler maps domain errors (`NotFoundError` → 404, `ValidationError` → 400, unknown → 500 with a generic message, details logged).
 - **No new runtime dependencies** unless a finding cannot be fixed without one; prefer what the stack already ships (`werkzeug.security`, Node `crypto`, `logging`).
 
@@ -84,13 +88,17 @@ PHASE 3: REFACTORING COMPLETE
 <tree of the new layout, source files only>
 
 ## Findings resolved
-<n>/<total> — unresolved: <AP-xx: reason, or "none">
+<n>/<total> — dropped by the human: <AP-xx, or "none">
+
+## Verification
+  ✓ [SEV] AP-xx <name> — <each check run> → <observed result>
+  ...
 
 ## Validation
   ✓ Application boots without errors (<start command>)
   ✓ All endpoints respond correctly (<n>/<n> match baseline; deviations: <approved decisions or "none">)
-  ✓ Zero CRITICAL/HIGH anti-patterns remaining (signals re-run)
+  ✓ Zero anti-patterns remaining (<n>/<n> findings verified)
 ================================
 ```
 
-A line that did not pass is printed with `✗` and the reason.
+Every finding of the report has one line under `Verification`, with the checks from its `Verification:` field and what each one returned. A check that did not pass is printed with `✗` and the reason, and the last validation line then reads `✗ Anti-patterns remaining: <list>`.

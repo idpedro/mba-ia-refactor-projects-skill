@@ -1,8 +1,8 @@
 # Refactoring playbook
 
-Concrete transformations for Phase 3, keyed by `P-xx` (referenced from `anti-patterns.md`). Examples show Python/Flask and Node/Express; translate the same move to other stacks.
+Concrete transformations for Phase 3, keyed by `P-xx` (referenced from `anti-patterns.md`). Examples show Python/Flask and Node/Express; in another stack apply the same move with that framework's idioms (its settings, auth and app structure).
 
-Each pattern keeps the HTTP contract unless the Phase 2 decisions say otherwise.
+Each pattern keeps the HTTP contract unless the Phase 2 decisions say otherwise. A pattern is done when the Verification checks of the findings it fixes pass, not when the code looks like the After example.
 
 ---
 
@@ -25,7 +25,8 @@ class Settings:
     HOST = os.environ.get("HOST", "127.0.0.1")
     PORT = int(os.environ.get("PORT", "5000"))
     DATABASE_PATH = os.environ.get("DATABASE_PATH", "loja.db")
-    CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
+    # explicit list; empty means no cross-origin access. Never "*".
+    CORS_ORIGINS = [o for o in os.environ.get("CORS_ORIGINS", "").split(",") if o]
 ```
 ```python
 app.config.from_object(Settings)
@@ -42,7 +43,7 @@ module.exports = {
   dbPath: process.env.DB_PATH || ':memory:',
 };
 ```
-Add `.env.example` with every variable (no real values). The host default changes to `127.0.0.1` only if the decisions approved it; otherwise keep the original host but still read it from config.
+Add `.env.example` with every variable (no real values). The safe defaults are unconditional: debug off, host `127.0.0.1` (listening on every interface is an explicit `HOST=0.0.0.0` opt-in), no wildcard CORS, and no literal fallback for any secret: a missing secret is generated at boot (signing keys) or makes the feature fail closed (gateway keys, admin tokens). Seeded account passwords follow P-16.
 
 ---
 
@@ -165,13 +166,27 @@ return jsonify({"status": "ok", "database": "connected"})
 ```js
 logger.info(`Processing card ending ${card.slice(-4)}`);
 ```
-Dangerous admin endpoints keep their route and require the admin role through P-16:
+Dangerous admin endpoints keep their route and require the admin role through P-16. A destructive action keeps its effect for admins; SQL or code text from the request is never executed, not even for admins: the route runs only fixed, parameterized read queries from an allow-list that leaves out credential columns.
 ```python
 @admin_bp.post("/admin/reset-db")
 @require_admin
 def reset_db():
     return jsonify(admin_controller.reset_database()), 200
+
+CONSULTAS_ADMIN = {   # name -> fixed read-only SQL; no credential columns
+    "produtos_sem_estoque": "SELECT id, nome FROM produtos WHERE estoque = 0",
+    "pedidos_por_status": "SELECT status, COUNT(*) AS total FROM pedidos GROUP BY status",
+}
+
+@admin_bp.post("/admin/query")
+@require_admin
+def executar_query():
+    nome = (request.get_json(silent=True) or {}).get("consulta")
+    if nome not in CONSULTAS_ADMIN:
+        raise ValidationError("Consulta não permitida")
+    return jsonify({"dados": admin_controller.consultar(CONSULTAS_ADMIN[nome]), "sucesso": True}), 200
 ```
+State in the Phase 2 decision which field the route now accepts and list the allowed queries.
 Role from the request body: ignore it on public sign-up (`role = "user"`).
 
 ---
@@ -193,8 +208,9 @@ def criar_pedido():
 ```python
 # src/views/pedido_routes.py
 @pedido_bp.post("/pedidos")
+@require_auth                                      # P-16
 def criar_pedido():
-    resultado = pedido_controller.criar(request.get_json(silent=True))
+    resultado = pedido_controller.criar(request.get_json(silent=True), g.current_user)
     return jsonify({"dados": resultado, "sucesso": True, "mensagem": "Pedido criado com sucesso"}), 201
 
 # src/controllers/pedido_controller.py
@@ -203,10 +219,11 @@ class PedidoController:
         self.pedidos = pedido_model
         self.notifications = notification_service
 
-    def criar(self, dados):
+    def criar(self, dados, actor):
         payload = validar_pedido(dados)            # raises ValidationError
-        resultado = self.pedidos.criar(payload["usuario_id"], payload["itens"])
-        self.notifications.pedido_criado(resultado["pedido_id"], payload["usuario_id"])
+        usuario_id = owner_for(actor, payload.get("usuario_id"))   # P-16: the token decides the owner
+        resultado = self.pedidos.criar(usuario_id, payload["itens"])
+        self.notifications.pedido_criado(resultado["pedido_id"], usuario_id)
         return resultado
 ```
 Same move for rules like discount tiers, payment approval, overdue computation and report aggregation: they land in a controller or service method the route calls in one line.
@@ -313,7 +330,9 @@ class AuditService:
         db.session.commit()
 
     def for_user(self, user_id):
-        return AuditEvent.query.filter_by(user_id=user_id).order_by(AuditEvent.created_at).all()
+        return db.session.scalars(
+            db.select(AuditEvent).filter_by(user_id=user_id).order_by(AuditEvent.created_at)
+        ).all()
 ```
 Raw-SQL projects add the `CREATE TABLE IF NOT EXISTS` next to the existing schema and a model module with parameterized queries (P-02).
 
@@ -627,6 +646,8 @@ The guard is on in the default configuration. No environment variable switches i
 - Public: login, sign-up, health/index, and read-only catalog listings meant for anonymous visitors (e.g. `GET /produtos`).
 - Authenticated: everything else that reads or changes data.
 - Owner or admin: routes scoped to one user (`/usuarios/<id>`, `/pedidos/usuario/<id>`, `/users/<user_id>`), and every write (`PUT`, `PATCH`, `DELETE`) on a record that belongs to a user (a task's `user_id`, an order's `usuario_id`). Reading shared lists may stay open to any authenticated user; changing someone else's record may not.
+- The owner comes from the token. On create, a non-admin's record is owned by the caller: a body that names another owner gets `403`, and a body with no owner gets the caller. On update, a non-admin cannot change the owner field. A user can always edit and delete the records they created. Admins may set any owner.
+- Every route that filters by owner (`/users/<id>/tasks`, `?user_id=` on a search) applies the same rule, so the restriction cannot be bypassed through another route.
 - Admin only: listings of every user or order, status changes, reports, destructive and admin routes.
 - `401` when the token is missing or invalid, `403` when the user lacks the role or ownership. Both go through the central error handler (P-10).
 
@@ -747,5 +768,15 @@ module.exports = { sign, requireAuth, requireAdmin };
 ```
 A project with no login route and only admin routes to protect (e.g. a public checkout plus an admin report) can use a static admin token from config instead, compared with `crypto.timingSafeEqual`. When the token is unset the admin routes answer `401`/`403` to everyone.
 
-**Seeds and validation**: keep a seeded admin whose credentials are documented in the README, so the baseline and validation steps can log in, send `Authorization: Bearer <token>` to protected routes, and confirm that the same routes answer `401` without it.
+Owner helper used by controllers:
+```python
+def owner_for(actor, requested_owner_id):
+    if is_admin(actor):
+        return requested_owner_id
+    if requested_owner_id not in (None, actor["id"]):
+        raise ForbiddenError("Apenas administradores criam registros para outros usuários")
+    return actor["id"]
+```
+
+**Seeds and validation**: seeded accounts get their passwords from environment variables (`ADMIN_PASSWORD`, `SEED_USER_PASSWORD`, listed in `.env.example`); when a variable is unset, the seed step generates a random password and prints it once. No literal password appears in code, seeds or README. The validation sets those variables, logs in as each identity it needs (anonymous, regular user, a second regular user, admin) and runs the AP-11 checks: `401` without a token, `403` for a regular user on admin routes and on another user's records, the baseline status for the owner and the admin.
 
