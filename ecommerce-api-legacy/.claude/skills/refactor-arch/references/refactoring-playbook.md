@@ -503,7 +503,7 @@ with self.db.connection:   # commits on success, rolls back on exception
 ```
 Orphans: delete children before the parent inside the same transaction (or declare `ON DELETE CASCADE`; SQLite needs `PRAGMA foreign_keys = ON`).
 
-In-memory SQLite (`':memory:'`) with a promisified API: every `await` must use the **same** `Database` instance, and the server must start listening only after schema and seeds have resolved.
+In-memory SQLite (`':memory:'`) with a promisified API: every `await` must use the **same** `Database` instance, and the server must start listening only after schema and seeds have resolved. A single shared connection has one transaction at a time: queue transactions so they never interleave, and run the reads a transaction depends on (does this email exist, is this course active) inside it, so concurrent requests cannot see or join each other's uncommitted work.
 
 ---
 
@@ -535,7 +535,7 @@ def validar_produto(dados):
         "categoria": dados.get("categoria", "geral"),
     }
 ```
-Both create and update call `validar_produto`, keeping the original messages so error bodies match the baseline. For serialization, the model's `to_dict()` is the single source; routes stop building dicts by hand and add computed fields (`overdue`) from a model method:
+Both create and update call `validar_produto`, keeping the original messages so error bodies match the baseline. Uniqueness belongs to the database: a unique index (case-insensitive for emails, e.g. `COLLATE NOCASE` or a normalised lowercase column), with the constraint violation mapped to `409`; a `SELECT` before the `INSERT` is only a friendlier message, never the guarantee. For serialization, the model's `to_dict()` is the single source; routes stop building dicts by hand and add computed fields (`overdue`) from a model method:
 ```python
 def to_dict(self, include_overdue=False):
     data = {...}

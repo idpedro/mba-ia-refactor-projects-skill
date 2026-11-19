@@ -16,7 +16,7 @@ Phase 2 prints this verbatim structure. Phase 3 step 1 saves the same text to `r
 
 `Verification` turns the finding's Impact into checks that **fail on the current code and pass after Phase 3**. Phase 3 runs every one of them and is not done until all pass.
 
-- Cover every harm the Impact names. If the Impact says users can "read, change, reassign and delete" others' data, there is one check for each verb.
+- Cover every harm the Impact names, in the conditions it happens: if it can happen under concurrency or with input variants (two simultaneous sign-ups, the same email in another case, a double submit), the check sends exactly that. If the Impact says users can "read, change, reassign and delete" others' data, there is one check for each verb.
 - Name the identity for every HTTP check: anonymous, regular user, a *different* regular user, admin. Access findings always include the case "user A acting on user B's record".
 - Prefer behaviour over code shape: a request and its expected status and body, a query on the stored value, a restart, a forced failure mid-write, a count of queries, the address the server listens on. A grep that must return no hits is enough only for findings about code shape (dead imports, naming, magic numbers, deprecated calls).
 - Write each check so anyone can run it: `METHOD path` + identity + body → expected result; `SQL` → expected value; `grep -nE "<pattern>" <paths>` → no hits.
@@ -36,7 +36,7 @@ Examples by catalog entry (adapt names and routes to the project):
 | AP-11 | anonymous → `401`; regular user on admin routes → `403`; user A reading, changing, reassigning or deleting user B's record, or creating one owned by B → `403`; the owner on their own record → baseline status |
 | AP-12 | the server listens on `127.0.0.1` (`ss -ltnp`); debug off in the boot log; a cross-origin preflight from an unlisted origin gets no `Access-Control-Allow-Origin` |
 | AP-13 | count the SQL statements one request runs (driver trace or ORM echo) → constant, not one per row |
-| AP-14, AP-15 | the invalid inputs the finding names → `400` with a message on every endpoint that accepts them (create and update alike) |
+| AP-14, AP-15 | the invalid inputs the finding names → `400` with a message on every endpoint that accepts them (create and update alike); for uniqueness, 20 concurrent creates with the same value and its case variant → exactly one success, the rest `409`, and one row in the table |
 | AP-16 | an unexpected error → `500` with a generic message and the detail only in the log |
 | AP-17 | grep for the deprecated call → no hits; the app runs with deprecation warnings turned into errors where the stack supports it |
 | AP-19 – AP-23 | grep for the literal, name or import → no hits |

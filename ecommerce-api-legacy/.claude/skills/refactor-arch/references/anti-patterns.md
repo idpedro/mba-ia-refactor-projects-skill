@@ -102,7 +102,7 @@ When one site matches two entries, report one finding per entry (the same lines 
 - **Fix**: P-12.
 
 ### AP-15 Missing or inconsistent input validation
-- **Signals**: request fields used without type or presence checks (`dados.get("status")` on a `None` body, `int(request.args["x"])` that raises 500 on bad input, `priority < 1` on a string); update endpoints that skip the checks create endpoints do; a validated email regex in one route and none in another.
+- **Signals**: request fields used without type or presence checks (`dados.get("status")` on a `None` body, `int(request.args["x"])` that raises 500 on bad input, `priority < 1` on a string); update endpoints that skip the checks create endpoints do; a validated email regex in one route and none in another; uniqueness checked with a `SELECT` before the `INSERT` and no unique constraint in the schema (concurrent requests both pass), or compared case-sensitively for values like emails.
 - **Fix**: P-12.
 
 ### AP-16 Scattered or leaky error handling
