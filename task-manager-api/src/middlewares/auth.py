@@ -1,52 +1,43 @@
+"""Guards de autenticação. Sempre ativos: não há variável que os desligue."""
 from functools import wraps
 
 from flask import current_app, g, request
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from src.errors import ForbiddenError, UnauthorizedError
+from src.models import User
 
 BEARER_PREFIX = 'Bearer '
 
 
-def _serializer():
-    return URLSafeTimedSerializer(current_app.config['SECRET_KEY'], salt='auth')
-
-
-def issue_token(user_id):
-    return _serializer().dumps({'uid': user_id})
-
-
-def authenticate(required=True):
-    """Resolve the bearer token to a User. Returns None for an anonymous call when not required."""
+def _user_from_header():
     header = request.headers.get('Authorization', '')
-    if not header:
-        if required:
-            raise UnauthorizedError('Token ausente')
-        return None
     if not header.startswith(BEARER_PREFIX):
+        return None
+    user_id = current_app.extensions['auth_service'].user_id_from(header[len(BEARER_PREFIX):])
+    user = User.get(user_id)
+    if user is None:
         raise UnauthorizedError('Token inválido')
-    try:
-        data = _serializer().loads(header[len(BEARER_PREFIX):], max_age=current_app.config['TOKEN_MAX_AGE'])
-    except (BadSignature, SignatureExpired):
-        raise UnauthorizedError('Token inválido')
-    user = current_app.extensions['user_model'].get(data.get('uid'))
-    if user is None or not user.active:
-        raise UnauthorizedError('Token inválido')
+    if not user.active:
+        raise ForbiddenError('Usuário inativo')
     return user
 
 
-def optional_auth(view):
-    @wraps(view)
-    def wrapper(*args, **kwargs):
-        g.current_user = authenticate(required=False)
-        return view(*args, **kwargs)
-    return wrapper
+def current_user():
+    user = _user_from_header()
+    if user is None:
+        raise UnauthorizedError('Token ausente')
+    return user
+
+
+def optional_user():
+    """Usuário do token, se houver; rotas públicas usam para reconhecer o admin."""
+    return _user_from_header()
 
 
 def require_auth(view):
     @wraps(view)
     def wrapper(*args, **kwargs):
-        g.current_user = authenticate()
+        g.current_user = current_user()
         return view(*args, **kwargs)
     return wrapper
 
@@ -54,7 +45,7 @@ def require_auth(view):
 def require_admin(view):
     @wraps(view)
     def wrapper(*args, **kwargs):
-        g.current_user = authenticate()
+        g.current_user = current_user()
         if not g.current_user.is_admin():
             raise ForbiddenError('Acesso restrito a administradores')
         return view(*args, **kwargs)
@@ -65,7 +56,7 @@ def require_self_or_admin(param):
     def decorator(view):
         @wraps(view)
         def wrapper(*args, **kwargs):
-            g.current_user = authenticate()
+            g.current_user = current_user()
             if g.current_user.id != kwargs[param] and not g.current_user.is_admin():
                 raise ForbiddenError('Acesso negado')
             return view(*args, **kwargs)

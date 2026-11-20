@@ -1,48 +1,43 @@
 from flask import Blueprint, g, jsonify, request
 
-from src.middlewares.auth import issue_token, optional_auth, require_admin, require_self_or_admin
+from src.middlewares.auth import optional_user, require_admin, require_self_or_admin
 
 
-def build_user_routes(controller):
+def build_user_routes(user_controller):
     bp = Blueprint('users', __name__)
 
     @bp.get('/users')
     @require_admin
-    def get_users():
-        return jsonify(controller.list()), 200
+    def list_users():
+        return jsonify(user_controller.list()), 200
 
     @bp.get('/users/<int:user_id>')
     @require_self_or_admin('user_id')
     def get_user(user_id):
-        return jsonify(controller.get(user_id)), 200
+        return jsonify(user_controller.get(user_id)), 200
 
     @bp.post('/users')
-    @optional_auth
     def create_user():
-        return jsonify(controller.create(request.get_json(silent=True), g.current_user)), 201
+        return jsonify(user_controller.create(optional_user(), request.get_json(silent=True))), 201
 
     @bp.put('/users/<int:user_id>')
     @require_self_or_admin('user_id')
     def update_user(user_id):
-        return jsonify(controller.update(user_id, request.get_json(silent=True), g.current_user)), 200
+        payload = request.get_json(silent=True)
+        return jsonify(user_controller.update(g.current_user, user_id, payload)), 200
 
     @bp.delete('/users/<int:user_id>')
     @require_admin
     def delete_user(user_id):
-        return jsonify(controller.delete(user_id)), 200
+        return jsonify(user_controller.delete(user_id)), 200
 
     @bp.get('/users/<int:user_id>/tasks')
     @require_self_or_admin('user_id')
     def get_user_tasks(user_id):
-        return jsonify(controller.tasks_of(user_id)), 200
+        return jsonify(user_controller.tasks_of(user_id)), 200
 
     @bp.post('/login')
     def login():
-        user = controller.login(request.get_json(silent=True))
-        return jsonify({
-            'message': 'Login realizado com sucesso',
-            'user': user.to_dict(),
-            'token': issue_token(user.id),
-        }), 200
+        return jsonify(user_controller.login(request.get_json(silent=True))), 200
 
     return bp

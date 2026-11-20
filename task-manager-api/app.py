@@ -1,3 +1,4 @@
+"""Ponto de entrada: `python app.py`. A montagem do app fica em src/app.py."""
 from src.app import create_app
 from src.config.settings import Settings
 

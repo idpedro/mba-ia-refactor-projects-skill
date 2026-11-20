@@ -1,84 +1,109 @@
 import logging
 
-from src.config.settings import ROLE_USER
-from src.controllers.validators import validate_login_payload, validate_user_payload
+from sqlalchemy.exc import IntegrityError
+
+from src.constants import ROLE_USER
+from src.controllers.validators import validate_login, validate_new_user, validate_user_update
+from src.database import db
 from src.errors import ConflictError, ForbiddenError, NotFoundError, UnauthorizedError
+from src.models import Task, User
 
 logger = logging.getLogger(__name__)
 
+# Formato reduzido de task devolvido por GET /users/<id>/tasks.
+USER_TASK_FIELDS = ('id', 'title', 'description', 'status', 'priority', 'created_at', 'due_date')
+ADMIN_ONLY_FIELDS = ('role', 'active')
+
 
 class UserController:
-    def __init__(self, users, tasks):
-        self.users = users
-        self.tasks = tasks
+    def __init__(self, auth_service):
+        self._auth = auth_service
 
     def list(self):
-        counts = self.users.task_counts()
-        return [dict(user.to_dict(), task_count=counts.get(user.id, 0)) for user in self.users.list_all()]
+        return [
+            {**user.to_dict(), 'task_count': task_count}
+            for user, task_count in User.list_with_task_counts()
+        ]
 
     def get(self, user_id):
-        user = self._get_or_404(user_id)
+        user = self._existing(user_id)
         data = user.to_dict()
-        data['tasks'] = [task.to_dict() for task in self.tasks.for_user(user_id)]
+        data['tasks'] = [task.to_dict() for task in Task.list_all(owner_id=user_id)]
         return data
 
-    def create(self, data, actor):
-        fields = validate_user_payload(data, creating=True)
-        if self.users.get_by_email(fields['email']):
+    def tasks_of(self, user_id):
+        self._existing(user_id)
+        return [
+            task.to_dict(include_overdue=True, fields=USER_TASK_FIELDS)
+            for task in Task.list_all(owner_id=user_id)
+        ]
+
+    def create(self, actor, data):
+        fields = validate_new_user(data)
+        if actor is None or not actor.is_admin():
+            fields['role'] = ROLE_USER  # cadastro público nunca escolhe o próprio role
+        if User.email_taken(fields['email']):
             raise ConflictError('Email já cadastrado')
-        role = fields.get('role', ROLE_USER)
-        if role != ROLE_USER and not (actor and actor.is_admin()):
-            raise ForbiddenError('Apenas administradores podem definir o role')
-        user = self.users(name=fields['name'], email=fields['email'], role=role)
+
+        user = User(name=fields['name'], email=fields['email'], role=fields['role'])
         user.set_password(fields['password'])
-        user.save()
-        logger.info('Usuário criado id=%s', user.id)
+        db.session.add(user)
+        self._commit_unique_email()
+        logger.info('Usuário criado: %s - %s', user.id, user.name)
         return user.to_dict()
 
-    def update(self, user_id, data, actor):
-        user = self._get_or_404(user_id)
-        fields = validate_user_payload(data, creating=False)
+    def update(self, actor, user_id, data):
+        user = self._existing(user_id)
+        fields = validate_user_update(data)
+        if not actor.is_admin() and any(field in fields for field in ADMIN_ONLY_FIELDS):
+            raise ForbiddenError('Apenas administradores alteram role ou status')
+        if 'email' in fields and User.email_taken(fields['email'], exclude_id=user_id):
+            raise ConflictError('Email já cadastrado')
 
-        if 'email' in fields and fields['email'] != user.email:
-            existing = self.users.get_by_email(fields['email'])
-            if existing and existing.id != user.id:
-                raise ConflictError('Email já cadastrado')
-        privileged = {name for name in ('role', 'active') if name in fields and fields[name] != getattr(user, name)}
-        if privileged and not actor.is_admin():
-            raise ForbiddenError('Apenas administradores podem alterar role ou active')
-
-        for name in ('name', 'email', 'role', 'active'):
-            if name in fields:
-                setattr(user, name, fields[name])
-        if 'password' in fields:
-            user.set_password(fields['password'])
-        user.save()
+        password = fields.pop('password', None)
+        for name, value in fields.items():
+            setattr(user, name, value)
+        if password is not None:
+            user.set_password(password)
+        self._commit_unique_email()
         return user.to_dict()
 
     def delete(self, user_id):
-        user = self._get_or_404(user_id)
-        user.delete_with_tasks()
-        logger.info('Usuário deletado id=%s', user_id)
+        user = self._existing(user_id)
+        Task.delete_for_user(user_id)
+        db.session.delete(user)
+        db.session.commit()  # tasks e usuário saem na mesma transação
+        logger.info('Usuário deletado: %s', user_id)
         return {'message': 'Usuário deletado com sucesso'}
 
-    def tasks_of(self, user_id):
-        self._get_or_404(user_id)
-        return [task.to_summary_dict() for task in self.tasks.for_user(user_id)]
-
     def login(self, data):
-        email, password = validate_login_payload(data)
-        user = self.users.get_by_email(email)
+        email, password = validate_login(data)
+        user = User.find_by_email(email)
         if user is None or not user.check_password(password):
             raise UnauthorizedError('Credenciais inválidas')
         if not user.active:
             raise ForbiddenError('Usuário inativo')
-        if user.needs_rehash():
+        if user.has_legacy_password():
             user.set_password(password)
-            user.save()
-        return user
+            db.session.commit()
+            logger.info('Senha de %s migrada para scrypt', user.email)
+        return {
+            'message': 'Login realizado com sucesso',
+            'user': user.to_dict(),
+            'token': self._auth.issue_token(user.id),
+        }
 
-    def _get_or_404(self, user_id):
-        user = self.users.get(user_id)
+    @staticmethod
+    def _existing(user_id):
+        user = User.get(user_id)
         if user is None:
             raise NotFoundError('Usuário não encontrado')
         return user
+
+    @staticmethod
+    def _commit_unique_email():
+        try:
+            db.session.commit()
+        except IntegrityError as error:
+            db.session.rollback()
+            raise ConflictError('Email já cadastrado') from error

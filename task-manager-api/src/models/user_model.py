@@ -1,27 +1,13 @@
-import hashlib
-import hmac
-
 from sqlalchemy import func, select
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from src.config.settings import ROLE_ADMIN, ROLE_USER
-from src.database import db, utcnow
-from src.models.base import PersistentMixin
-from src.models.task_model import Task
-
-LEGACY_HASH_LENGTH = 32
+from src.constants import ROLE_ADMIN, ROLE_USER
+from src.database import db
+from src.models import legacy_password
+from src.models.base import utcnow
 
 
-def _is_legacy_hash(stored):
-    return len(stored) == LEGACY_HASH_LENGTH and '$' not in stored
-
-
-def _legacy_digest(raw):
-    # Verify-only: accepts hashes written before the KDF migration (never used to store).
-    return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
-
-
-class User(PersistentMixin, db.Model):
+class User(db.Model):
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -42,16 +28,16 @@ class User(PersistentMixin, db.Model):
             'created_at': str(self.created_at),
         }
 
-    def set_password(self, raw):
-        self.password = generate_password_hash(raw)
+    def set_password(self, raw_password):
+        self.password = generate_password_hash(raw_password)
 
-    def check_password(self, raw):
-        if _is_legacy_hash(self.password):
-            return hmac.compare_digest(self.password, _legacy_digest(raw))
-        return check_password_hash(self.password, raw)
+    def check_password(self, raw_password):
+        if legacy_password.is_wrapped(self.password):
+            return legacy_password.check_wrapped(self.password, raw_password)
+        return check_password_hash(self.password, raw_password)
 
-    def needs_rehash(self):
-        return _is_legacy_hash(self.password)
+    def has_legacy_password(self):
+        return legacy_password.is_wrapped(self.password)
 
     def is_admin(self):
         return self.role == ROLE_ADMIN
@@ -61,27 +47,32 @@ class User(PersistentMixin, db.Model):
         return db.session.get(cls, user_id)
 
     @classmethod
-    def get_by_email(cls, email):
-        return db.session.scalars(select(cls).where(cls.email == email)).first()
+    def find_by_email(cls, email):
+        return db.session.scalar(select(cls).where(func.lower(cls.email) == email.lower()))
+
+    @classmethod
+    def email_taken(cls, email, exclude_id=None):
+        query = select(cls.id).where(func.lower(cls.email) == email.lower())
+        if exclude_id is not None:
+            query = query.where(cls.id != exclude_id)
+        return db.session.scalar(query) is not None
 
     @classmethod
     def list_all(cls):
         return db.session.scalars(select(cls).order_by(cls.id)).all()
 
     @classmethod
-    def task_counts(cls):
-        rows = db.session.execute(
-            select(Task.user_id, func.count(Task.id)).where(Task.user_id.isnot(None)).group_by(Task.user_id)
-        ).all()
-        return {user_id: count for user_id, count in rows}
+    def list_with_task_counts(cls):
+        from src.models.task_model import Task
 
-    def delete_with_tasks(self):
-        """Delete the user and their tasks in one transaction."""
-        try:
-            for task in Task.for_user(self.id):
-                db.session.delete(task)
-            db.session.delete(self)
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            raise
+        rows = db.session.execute(
+            select(cls, func.count(Task.id))
+            .outerjoin(Task, Task.user_id == cls.id)
+            .group_by(cls.id)
+            .order_by(cls.id)
+        ).all()
+        return [(user, task_count) for user, task_count in rows]
+
+    @classmethod
+    def count(cls):
+        return db.session.scalar(select(func.count(cls.id)))

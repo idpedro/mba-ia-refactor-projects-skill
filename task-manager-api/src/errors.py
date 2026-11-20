@@ -1,3 +1,6 @@
+"""Erros de domínio; o handler central (middlewares/error_handler.py) os traduz em HTTP."""
+
+
 class AppError(Exception):
     status = 500
 

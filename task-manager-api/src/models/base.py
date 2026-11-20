@@ -1,21 +1,6 @@
-from src.database import db
+from datetime import datetime, timezone
 
 
-class PersistentMixin:
-    """Commit-or-rollback helpers shared by every model."""
-
-    def save(self):
-        try:
-            db.session.add(self)
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            raise
-
-    def delete(self):
-        try:
-            db.session.delete(self)
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            raise
+def utcnow():
+    """UTC sem tzinfo, no mesmo formato das datas já gravadas no banco."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)

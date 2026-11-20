@@ -1,0 +1,22 @@
+"""Regras de domínio nomeadas: status, roles, limites e rótulos."""
+
+TASK_STATUSES = ('pending', 'in_progress', 'done', 'cancelled')
+STATUS_PENDING, STATUS_IN_PROGRESS, STATUS_DONE, STATUS_CANCELLED = TASK_STATUSES
+FINAL_STATUSES = (STATUS_DONE, STATUS_CANCELLED)
+
+USER_ROLES = ('user', 'admin', 'manager')
+ROLE_USER, ROLE_ADMIN, ROLE_MANAGER = USER_ROLES
+
+MIN_TITLE_LENGTH = 3
+MAX_TITLE_LENGTH = 200
+MIN_PRIORITY = 1
+MAX_PRIORITY = 5
+DEFAULT_PRIORITY = 3
+HIGH_PRIORITY_MAX = 2
+PRIORITY_LABELS = {1: 'critical', 2: 'high', 3: 'medium', 4: 'low', 5: 'minimal'}
+
+MIN_PASSWORD_LENGTH = 4
+DEFAULT_COLOR = '#000000'
+DATE_FORMAT = '%Y-%m-%d'
+RECENT_ACTIVITY_DAYS = 7
+PERCENT_DECIMALS = 2
