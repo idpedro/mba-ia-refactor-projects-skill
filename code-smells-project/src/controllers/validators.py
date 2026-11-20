@@ -1,18 +1,21 @@
+"""Validação única de entrada por entidade. Mensagens originais preservadas."""
+import math
+import re
+
 from src.errors import ValidationError
-from src.models.pedido_model import STATUS_PEDIDO
-from src.models.produto_model import CATEGORIAS_VALIDAS
+from src.models.constants import CATEGORIA_PADRAO, CATEGORIAS_VALIDAS, NOME_MAX, NOME_MIN, STATUS_PEDIDO
 
-NOME_MIN, NOME_MAX = 2, 200
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+CAMPOS_PRODUTO = (
+    ("nome", "Nome é obrigatório"),
+    ("preco", "Preço é obrigatório"),
+    ("estoque", "Estoque é obrigatório"),
+)
 
 
-def _corpo(dados):
-    if not isinstance(dados, dict) or not dados:
-        raise ValidationError("Dados inválidos")
-    return dados
-
-
-def _numero(valor):
-    return isinstance(valor, (int, float)) and not isinstance(valor, bool)
+def _numero_finito(valor):
+    return isinstance(valor, (int, float)) and not isinstance(valor, bool) and math.isfinite(valor)
 
 
 def _inteiro(valor):
@@ -20,19 +23,29 @@ def _inteiro(valor):
 
 
 def validar_produto(dados):
-    dados = _corpo(dados)
-    for campo, rotulo in (("nome", "Nome"), ("preco", "Preço"), ("estoque", "Estoque")):
+    if not isinstance(dados, dict) or not dados:
+        raise ValidationError("Dados inválidos")
+    for campo, mensagem in CAMPOS_PRODUTO:
         if campo not in dados:
-            raise ValidationError(f"{rotulo} é obrigatório")
-    nome, descricao = dados["nome"], dados.get("descricao", "")
-    preco, estoque = dados["preco"], dados["estoque"]
-    categoria = dados.get("categoria", "geral")
+            raise ValidationError(mensagem)
 
-    if not _numero(preco) or preco < 0:
+    nome = dados["nome"]
+    preco = dados["preco"]
+    estoque = dados["estoque"]
+    descricao = dados.get("descricao") or ""
+    categoria = dados.get("categoria", CATEGORIA_PADRAO)
+
+    if not isinstance(nome, str):
+        raise ValidationError("Nome inválido")
+    if not _numero_finito(preco):
+        raise ValidationError("Preço deve ser um número")
+    if not _inteiro(estoque):
+        raise ValidationError("Estoque deve ser um número inteiro")
+    if preco < 0:
         raise ValidationError("Preço não pode ser negativo")
-    if not _numero(estoque) or estoque < 0:
+    if estoque < 0:
         raise ValidationError("Estoque não pode ser negativo")
-    if not isinstance(nome, str) or len(nome) < NOME_MIN:
+    if len(nome) < NOME_MIN:
         raise ValidationError("Nome muito curto")
     if len(nome) > NOME_MAX:
         raise ValidationError("Nome muito longo")
@@ -40,72 +53,70 @@ def validar_produto(dados):
         raise ValidationError("Descrição inválida")
     if categoria not in CATEGORIAS_VALIDAS:
         raise ValidationError("Categoria inválida. Válidas: " + str(list(CATEGORIAS_VALIDAS)))
+
     return {"nome": nome, "descricao": descricao, "preco": preco, "estoque": estoque, "categoria": categoria}
 
 
-def validar_busca(args):
-    filtros = {"termo": args.get("q", ""), "categoria": args.get("categoria")}
-    for chave in ("preco_min", "preco_max"):
-        bruto = args.get(chave)
+def validar_filtros_busca(args):
+    filtros = {"termo": args.get("q", ""), "categoria": args.get("categoria") or None}
+    for campo in ("preco_min", "preco_max"):
+        bruto = args.get(campo)
+        if not bruto:
+            filtros[campo] = None
+            continue
         try:
-            filtros[chave] = float(bruto) if bruto else None
+            valor = float(bruto)
         except ValueError:
-            raise ValidationError(f"{chave} deve ser numérico")
+            raise ValidationError(f"{campo} inválido") from None
+        if not math.isfinite(valor):
+            raise ValidationError(f"{campo} inválido")
+        filtros[campo] = valor
     return filtros
 
 
 def validar_usuario(dados):
-    dados = _corpo(dados)
-    nome, email, senha = dados.get("nome", ""), dados.get("email", ""), dados.get("senha", "")
-    if not nome or not email or not senha:
+    if not isinstance(dados, dict) or not dados:
+        raise ValidationError("Dados inválidos")
+    nome, email, senha = (dados.get("nome", ""), dados.get("email", ""), dados.get("senha", ""))
+    if not all(isinstance(valor, str) and valor for valor in (nome, email, senha)):
         raise ValidationError("Nome, email e senha são obrigatórios")
-    if not all(isinstance(v, str) for v in (nome, email, senha)):
-        raise ValidationError("Nome, email e senha devem ser texto")
+    if not EMAIL_RE.match(email):
+        raise ValidationError("Email inválido")
     return {"nome": nome, "email": email, "senha": senha}
 
 
 def validar_login(dados):
-    if not isinstance(dados, dict):
-        raise ValidationError("Dados inválidos")
+    dados = dados if isinstance(dados, dict) else {}
     email, senha = dados.get("email", ""), dados.get("senha", "")
-    if not email or not senha:
+    if not (isinstance(email, str) and email and isinstance(senha, str) and senha):
         raise ValidationError("Email e senha são obrigatórios")
-    if not isinstance(email, str) or not isinstance(senha, str):
-        raise ValidationError("Email e senha devem ser texto")
-    return {"email": email, "senha": senha}
+    return email, senha
 
 
 def validar_pedido(dados):
-    dados = _corpo(dados)
-    usuario_id, itens = dados.get("usuario_id"), dados.get("itens", [])
-    if not usuario_id:
-        raise ValidationError("Usuario ID é obrigatório")
-    if not _inteiro(usuario_id):
+    if not isinstance(dados, dict) or not dados:
+        raise ValidationError("Dados inválidos")
+    usuario_id = dados.get("usuario_id")
+    if usuario_id is not None and not (_inteiro(usuario_id) and usuario_id > 0):
         raise ValidationError("Usuario ID inválido")
+    itens = dados.get("itens")
     if not itens:
         raise ValidationError("Pedido deve ter pelo menos 1 item")
     if not isinstance(itens, list):
         raise ValidationError("Itens inválidos")
+
+    quantidades = {}
     for item in itens:
-        if not isinstance(item, dict) or not _inteiro(item.get("produto_id")):
-            raise ValidationError("Cada item precisa de produto_id inteiro")
-        if not _inteiro(item.get("quantidade")) or item["quantidade"] <= 0:
-            raise ValidationError("Quantidade deve ser um inteiro positivo")
-    return {"usuario_id": usuario_id, "itens": itens}
+        produto_id = item.get("produto_id") if isinstance(item, dict) else None
+        quantidade = item.get("quantidade") if isinstance(item, dict) else None
+        if not (_inteiro(produto_id) and produto_id > 0 and _inteiro(quantidade) and quantidade >= 1):
+            raise ValidationError("Item inválido: produto_id e quantidade devem ser inteiros positivos")
+        quantidades[produto_id] = quantidades.get(produto_id, 0) + quantidade
+    return {"usuario_id": usuario_id, "quantidades": quantidades}
 
 
 def validar_status(dados):
-    if not isinstance(dados, dict):
-        raise ValidationError("Dados inválidos")
-    status = dados.get("status", "")
+    status = dados.get("status") if isinstance(dados, dict) else None
     if status not in STATUS_PEDIDO:
         raise ValidationError("Status inválido")
     return status
-
-
-def validar_consulta(dados):
-    if not isinstance(dados, dict) or not dados.get("sql"):
-        raise ValidationError("Query não informada")
-    if not isinstance(dados["sql"], str):
-        raise ValidationError("Query inválida")
-    return dados["sql"]

@@ -1,31 +1,24 @@
 import logging
 
-from src.controllers.validators import validar_consulta
+from src.errors import ValidationError
 
 logger = logging.getLogger(__name__)
 
 
 class SistemaController:
-    def __init__(self, sistema_model, relatorio_service, settings):
+    def __init__(self, sistema_model, versao):
         self.sistema = sistema_model
-        self.relatorios = relatorio_service
-        self.settings = settings
+        self.versao = versao
 
     def health(self):
-        return {
-            "status": "ok",
-            "database": "connected",
-            "counts": self.sistema.contagens(),
-            "versao": self.settings["APP_VERSION"],
-            "ambiente": self.settings["ENVIRONMENT"],
-        }
+        return {"status": "ok", "database": "connected", "counts": self.sistema.contagens(), "versao": self.versao}
 
-    def relatorio_vendas(self):
-        return self.relatorios.vendas()
-
-    def resetar_banco(self):
+    def resetar_banco(self, ator):
         self.sistema.resetar()
-        logger.warning("Banco de dados resetado")
+        logger.warning("Banco de dados resetado pelo usuário id=%s", ator["id"])
 
-    def executar_consulta(self, dados):
-        return self.sistema.consultar(validar_consulta(dados))
+    def consultar(self, dados):
+        nome = dados.get("consulta") if isinstance(dados, dict) else None
+        if not isinstance(nome, str) or not self.sistema.consulta_permitida(nome):
+            raise ValidationError("Consulta não permitida")
+        return self.sistema.executar_consulta(nome)

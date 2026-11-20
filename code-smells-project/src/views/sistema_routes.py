@@ -1,5 +1,6 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
+from src.errors import DatabaseUnavailableError
 from src.middlewares.auth import require_admin
 
 
@@ -10,7 +11,7 @@ def build_sistema_routes(controller):
     def index():
         return jsonify({
             "mensagem": "Bem-vindo à API da Loja",
-            "versao": "1.0.0",
+            "versao": controller.versao,
             "endpoints": {
                 "produtos": "/produtos",
                 "usuarios": "/usuarios",
@@ -23,23 +24,21 @@ def build_sistema_routes(controller):
 
     @bp.get("/health")
     def health_check():
-        return jsonify(controller.health()), 200
-
-    @bp.get("/relatorios/vendas")
-    @require_admin
-    def relatorio_vendas():
-        return jsonify({"dados": controller.relatorio_vendas(), "sucesso": True}), 200
+        try:
+            return jsonify(controller.health()), 200
+        except DatabaseUnavailableError as err:
+            return jsonify({"status": "erro", "detalhes": err.message}), 500
 
     @bp.post("/admin/reset-db")
     @require_admin
     def reset_database():
-        controller.resetar_banco()
+        controller.resetar_banco(g.current_user)
         return jsonify({"mensagem": "Banco de dados resetado", "sucesso": True}), 200
 
     @bp.post("/admin/query")
     @require_admin
     def executar_query():
-        dados = controller.executar_consulta(request.get_json(silent=True))
+        dados = controller.consultar(request.get_json(silent=True))
         return jsonify({"dados": dados, "sucesso": True}), 200
 
     return bp

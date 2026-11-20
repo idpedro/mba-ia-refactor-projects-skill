@@ -1,3 +1,6 @@
+"""Erros de domínio; o handler central converte cada um no status HTTP correspondente."""
+
+
 class AppError(Exception):
     status = 500
 
@@ -24,3 +27,7 @@ class NotFoundError(AppError):
 
 class ConflictError(AppError):
     status = 409
+
+
+class DatabaseUnavailableError(AppError):
+    status = 500
