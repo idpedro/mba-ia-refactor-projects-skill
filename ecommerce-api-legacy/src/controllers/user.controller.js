@@ -1,7 +1,3 @@
-const { validateUserId } = require('../validators/checkout.validator');
-
-const DELETED_MESSAGE = 'Usuário deletado, junto com as matrículas e pagamentos relacionados.';
-
 class UserController {
     constructor({ db, userModel, logger }) {
         this.db = db;
@@ -9,13 +5,11 @@ class UserController {
         this.logger = logger;
     }
 
-    // Idempotent like before: an unknown id still answers success.
-    async deleteUser(rawId) {
-        const id = validateUserId(rawId);
-        await this.db.transaction((tx) => this.users.deleteWithRelated(id, tx));
-        this.logger.info(`Usuário ${id} removido com matrículas e pagamentos`);
-        return DELETED_MESSAGE;
+    async deleteUser(id) {
+        const removed = await this.db.transaction(() => this.users.deleteWithEnrollments(id));
+        this.logger.info(`Remoção do usuário ${id}: ${removed} registro(s) removido(s)`);
+        return 'Usuário deletado.';
     }
 }
 
-module.exports = UserController;
+module.exports = { UserController };

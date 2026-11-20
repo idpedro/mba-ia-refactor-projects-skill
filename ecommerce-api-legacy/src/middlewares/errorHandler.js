@@ -1,22 +1,23 @@
 const { AppError } = require('../errors');
 
-const INTERNAL_ERROR_TEXT = 'Erro interno';
-const BAD_REQUEST_TEXT = 'Bad Request';
+const GENERIC_MESSAGE = 'Erro interno do servidor';
+const UNIQUE_VIOLATION = /UNIQUE constraint failed/;
 
-// Plain-text bodies, as the clients already expect. Unexpected errors answer
-// a generic 500 and only the log gets the detail.
+// Respostas de erro em texto puro, como no contrato original.
 function createErrorHandler(logger) {
-    // eslint-disable-next-line no-unused-vars
-    return (err, req, res, next) => {
-        if (err instanceof AppError && err.status < 500) {
-            return res.status(err.status).send(err.message);
+    return function errorHandler(err, req, res, next) { // eslint-disable-line no-unused-vars
+        if (err instanceof AppError) return res.status(err.status).send(err.message);
+
+        if (err && err.code === 'SQLITE_CONSTRAINT' && UNIQUE_VIOLATION.test(err.message)) {
+            return res.status(409).send('Conflito');
         }
-        // Malformed JSON body or other client-side errors raised by Express.
-        if (Number.isInteger(err.status) && err.status >= 400 && err.status < 500) {
-            return res.status(err.status).send(err.status === 400 ? BAD_REQUEST_TEXT : err.message);
+        // Erros do body parser (JSON malformado, corpo grande demais).
+        if (err && err.type && Number.isInteger(err.status) && err.status >= 400 && err.status < 500) {
+            return res.status(err.status).send('Bad Request');
         }
-        logger.error(`${req.method} ${req.originalUrl}: ${err.stack || err}`);
-        return res.status(500).send(INTERNAL_ERROR_TEXT);
+
+        logger.error(`Erro inesperado em ${req.method} ${req.originalUrl}`, err);
+        return res.status(500).send(GENERIC_MESSAGE);
     };
 }
 

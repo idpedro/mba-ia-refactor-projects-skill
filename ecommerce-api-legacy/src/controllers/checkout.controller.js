@@ -1,51 +1,60 @@
-const { NotFoundError, PaymentDeniedError } = require('../errors');
-const { PAYMENT_STATUS } = require('../services/payment.service');
 const { validateCheckout } = require('../validators/checkout.validator');
+const { PAYMENT_STATUS } = require('../services/payment.service');
+const { hashPassword, verifyPassword, generatePassword } = require('../services/password.service');
+const { ROLE_ADMIN } = require('../constants/roles');
+const { NotFoundError, ForbiddenError, ValidationError } = require('../errors');
 
 class CheckoutController {
-    constructor({ db, courseModel, userModel, enrollmentModel, paymentModel, auditLogModel,
-        paymentService, passwordService, logger }) {
+    constructor({ db, userModel, courseModel, enrollmentModel, paymentModel, auditLogModel, paymentService, logger }) {
         this.db = db;
-        this.courses = courseModel;
         this.users = userModel;
+        this.courses = courseModel;
         this.enrollments = enrollmentModel;
         this.payments = paymentModel;
         this.auditLogs = auditLogModel;
         this.paymentService = paymentService;
-        this.passwordService = passwordService;
         this.logger = logger;
     }
 
-    async checkout(body) {
-        const { name, email, password, courseId, card } = validateCheckout(body);
+    // `actor` é o usuário autenticado (Basic) ou null para checkout anônimo.
+    async checkout(body, actor) {
+        const input = validateCheckout(body);
 
-        const course = await this.courses.findActiveById(courseId);
-        if (!course) throw new NotFoundError('Curso não encontrado');
+        return this.db.transaction(async () => {
+            const course = await this.courses.findActiveById(input.courseId);
+            if (!course) throw new NotFoundError('Curso não encontrado');
 
-        // Charge first: a denied card must not leave a user behind.
-        const status = this.paymentService.charge(card);
-        if (status === PAYMENT_STATUS.DENIED) throw new PaymentDeniedError();
+            const existing = await this.users.findByEmail(input.email);
+            await this.assertCanEnroll(actor, existing, input);
 
-        // Hashed outside the transaction so scrypt never holds the write lock.
-        const passwordHash = password
-            ? await this.passwordService.hash(password)
-            : await this.passwordService.hashUnknownSecret();
+            const status = this.paymentService.charge(input.card, course.price);
+            if (status !== PAYMENT_STATUS.PAID) throw new ValidationError('Pagamento recusado');
 
-        const { userId, enrollmentId } = await this.db.transaction(async (tx) => {
-            const existing = await this.users.findByEmail(email, tx);
-            const id = existing
-                ? existing.id
-                : await this.users.create({ name, email, passwordHash }, tx);
+            const userId = existing ? existing.id : await this.users.create({
+                name: input.name,
+                email: input.email,
+                passwordHash: await hashPassword(input.password ?? generatePassword()),
+            });
+            const enrollmentId = await this.enrollments.create(userId, course.id);
+            await this.payments.create(enrollmentId, course.price, status);
+            await this.auditLogs.record(`Checkout curso ${course.id} por ${userId}`);
 
-            const enrollment = await this.enrollments.create({ userId: id, courseId }, tx);
-            await this.payments.create({ enrollmentId: enrollment, amount: course.price, status }, tx);
-            await this.auditLogs.record(`Checkout curso ${courseId} por ${id}`, tx);
-            return { userId: id, enrollmentId: enrollment };
+            this.logger.info(`Checkout concluído: curso ${course.id}, usuário ${userId}, matrícula ${enrollmentId}`);
+            return { msg: 'Sucesso', enrollment_id: enrollmentId };
         });
+    }
 
-        this.logger.info(`Checkout do curso ${courseId} pelo usuário ${userId}`);
-        return { msg: 'Sucesso', enrollment_id: enrollmentId };
+    // O dono da matrícula vem da credencial, nunca só do e-mail no corpo.
+    async assertCanEnroll(actor, existing, input) {
+        if (actor && actor.role === ROLE_ADMIN) return;
+        if (actor) {
+            if (actor.email !== input.email) throw new ForbiddenError('Acesso negado');
+            return;
+        }
+        if (existing && !(await verifyPassword(input.password, existing.pass))) {
+            throw new ForbiddenError('Acesso negado');
+        }
     }
 }
 
-module.exports = CheckoutController;
+module.exports = { CheckoutController };

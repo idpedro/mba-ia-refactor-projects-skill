@@ -1,5 +1,6 @@
-// Express 4 does not forward rejected promises on its own.
-const asyncHandler = (fn) => (req, res, next) =>
-    Promise.resolve(fn(req, res, next)).catch(next);
-
-module.exports = asyncHandler;
+// Express 4 não encaminha promessas rejeitadas ao error handler sozinho.
+module.exports = function asyncHandler(handler) {
+    return function wrapped(req, res, next) {
+        Promise.resolve(handler(req, res, next)).catch(next);
+    };
+};

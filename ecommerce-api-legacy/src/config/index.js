@@ -1,11 +1,13 @@
-// Every environment-dependent value. Secrets have no in-code default.
+// Configuração por ambiente. Segredos não têm valor literal de fallback:
+// senhas ausentes são geradas no seed e impressas uma única vez.
+const env = process.env;
+
 module.exports = {
-    port: Number(process.env.PORT) || 3000,
-    // Loopback by default; exposing the API on every interface needs HOST=0.0.0.0.
-    host: process.env.HOST || '127.0.0.1',
-    dbPath: process.env.DB_PATH || ':memory:',
-    paymentGatewayKey: process.env.PAYMENT_GATEWAY_KEY || '',
-    // Admin routes reject every request while this is empty (fail closed).
-    adminToken: process.env.ADMIN_TOKEN || '',
-    logLevel: process.env.LOG_LEVEL || 'info',
+    port: Number(env.PORT) || 3000,
+    // Escutar em todas as interfaces é opt-in explícito (HOST=0.0.0.0).
+    host: env.HOST || '127.0.0.1',
+    dbPath: env.DB_PATH || ':memory:',
+    adminEmail: (env.ADMIN_EMAIL || 'admin@fullcycle.com.br').trim().toLowerCase(),
+    adminPassword: env.ADMIN_PASSWORD || '',
+    seedUserPassword: env.SEED_USER_PASSWORD || '',
 };

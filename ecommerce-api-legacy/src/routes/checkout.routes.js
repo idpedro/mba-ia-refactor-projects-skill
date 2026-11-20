@@ -1,14 +1,13 @@
 const express = require('express');
 const asyncHandler = require('../middlewares/asyncHandler');
 
-function checkoutRoutes(checkoutController) {
+module.exports = function checkoutRoutes({ checkoutController, auth }) {
     const router = express.Router();
 
-    router.post('/api/checkout', asyncHandler(async (req, res) => {
-        res.status(200).json(await checkoutController.checkout(req.body));
-    }));
+    async function checkout(req, res) {
+        res.status(200).json(await checkoutController.checkout(req.body, req.user || null));
+    }
 
+    router.post('/api/checkout', auth.optionalAuth, asyncHandler(checkout));
     return router;
-}
-
-module.exports = checkoutRoutes;
+};

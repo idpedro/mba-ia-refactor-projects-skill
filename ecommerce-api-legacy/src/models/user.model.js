@@ -1,27 +1,32 @@
+const { ROLE_STUDENT } = require('../constants/roles');
+
 class UserModel {
     constructor(db) {
         this.db = db;
     }
 
-    findByEmail(email, executor = this.db) {
-        return executor.get('SELECT id FROM users WHERE email = ?', [email]);
+    findByEmail(email) {
+        return this.db.get('SELECT id, name, email, pass, role FROM users WHERE email = ? COLLATE NOCASE', [email]);
     }
 
-    async create({ name, email, passwordHash }, executor = this.db) {
-        const { lastID } = await executor.run(
-            'INSERT INTO users (name, email, pass) VALUES (?, ?, ?)', [name, email, passwordHash]);
+    async create({ name, email, passwordHash }) {
+        const { lastID } = await this.db.run(
+            'INSERT INTO users (name, email, pass, role) VALUES (?, ?, ?, ?)',
+            [name, email, passwordHash, ROLE_STUDENT],
+        );
         return lastID;
     }
 
-    // Removes the user together with its enrollments and their payments.
-    // Callers wrap it in a transaction so nothing is left orphaned.
-    async deleteWithRelated(id, executor = this.db) {
-        await executor.run(
-            'DELETE FROM payments WHERE enrollment_id IN (SELECT id FROM enrollments WHERE user_id = ?)', [id]);
-        await executor.run('DELETE FROM enrollments WHERE user_id = ?', [id]);
-        const { changes } = await executor.run('DELETE FROM users WHERE id = ?', [id]);
+    // Remove o usuário e o que depende dele; deve rodar dentro de uma transação.
+    async deleteWithEnrollments(id) {
+        await this.db.run(
+            'DELETE FROM payments WHERE enrollment_id IN (SELECT id FROM enrollments WHERE user_id = ?)',
+            [id],
+        );
+        await this.db.run('DELETE FROM enrollments WHERE user_id = ?', [id]);
+        const { changes } = await this.db.run('DELETE FROM users WHERE id = ?', [id]);
         return changes;
     }
 }
 
-module.exports = UserModel;
+module.exports = { UserModel };

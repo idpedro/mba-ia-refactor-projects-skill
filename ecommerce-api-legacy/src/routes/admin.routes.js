@@ -1,14 +1,13 @@
 const express = require('express');
 const asyncHandler = require('../middlewares/asyncHandler');
 
-function adminRoutes(reportController, adminAuth) {
+module.exports = function adminRoutes({ reportController, auth }) {
     const router = express.Router();
 
-    router.get('/api/admin/financial-report', adminAuth, asyncHandler(async (req, res) => {
+    async function financialReport(req, res) {
         res.json(await reportController.financialReport());
-    }));
+    }
 
+    router.get('/api/admin/financial-report', auth.requireAdmin, asyncHandler(financialReport));
     return router;
-}
-
-module.exports = adminRoutes;
+};

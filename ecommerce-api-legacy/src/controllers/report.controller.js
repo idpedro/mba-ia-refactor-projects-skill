@@ -1,11 +1,12 @@
 class ReportController {
-    constructor({ reportService }) {
-        this.reports = reportService;
+    constructor({ db, reportService }) {
+        this.db = db;
+        this.reportService = reportService;
     }
 
     financialReport() {
-        return this.reports.financialReport();
+        return this.db.exclusive(() => this.reportService.financialReport());
     }
 }
 
-module.exports = ReportController;
+module.exports = { ReportController };

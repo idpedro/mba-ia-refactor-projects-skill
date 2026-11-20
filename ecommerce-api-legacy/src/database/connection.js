@@ -1,51 +1,55 @@
 const sqlite3 = require('sqlite3');
 
-const promisifyRun = (db, sql, params) => new Promise((resolve, reject) =>
-    db.run(sql, params, function onRun(err) {
-        if (err) reject(err);
-        else resolve({ lastID: this.lastID, changes: this.changes });
-    }));
+// Uma conexão única (o banco padrão é em memória) com API promisificada.
+// Como a conexão é compartilhada, todo trabalho de um caso de uso passa por uma
+// fila: transações nunca se intercalam e leituras não enxergam escritas ainda
+// não confirmadas de outra requisição.
+function createConnection(path) {
+    const raw = new sqlite3.Database(path);
+    let queue = Promise.resolve();
 
-const promisifyGet = (db, sql, params) => new Promise((resolve, reject) =>
-    db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row))));
-
-const promisifyAll = (db, sql, params) => new Promise((resolve, reject) =>
-    db.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows))));
-
-// One sqlite connection, promisified. Transactions are serialized through a
-// lock: a single connection cannot hold two BEGIN at once.
-function createConnection(dbPath) {
-    const db = new sqlite3.Database(dbPath);
-
-    const executor = {
-        run: (sql, params = []) => promisifyRun(db, sql, params),
-        get: (sql, params = []) => promisifyGet(db, sql, params),
-        all: (sql, params = []) => promisifyAll(db, sql, params),
-    };
-
-    let lock = Promise.resolve();
-
-    // `work` receives the executor to use inside the transaction.
-    const transaction = (work) => {
-        const result = lock.then(async () => {
-            await executor.run('BEGIN');
-            try {
-                const value = await work(executor);
-                await executor.run('COMMIT');
-                return value;
-            } catch (err) {
-                await executor.run('ROLLBACK');
-                throw err;
-            }
+    const run = (sql, params = []) => new Promise((resolve, reject) => {
+        raw.run(sql, params, function onRun(err) {
+            if (err) return reject(err);
+            return resolve({ lastID: this.lastID, changes: this.changes });
         });
-        lock = result.catch(() => {});
+    });
+
+    const get = (sql, params = []) => new Promise((resolve, reject) => {
+        raw.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)));
+    });
+
+    const all = (sql, params = []) => new Promise((resolve, reject) => {
+        raw.all(sql, params, (err, rows) => (err ? reject(err) : resolve(rows)));
+    });
+
+    const enqueue = (work) => {
+        const result = queue.then(work);
+        queue = result.catch(() => {});
         return result;
     };
 
-    const close = () => new Promise((resolve, reject) =>
-        db.close((err) => (err ? reject(err) : resolve())));
+    // Executa `work` sozinho na conexão, sem transação (leituras).
+    const exclusive = (work) => enqueue(work);
 
-    return { ...executor, transaction, close };
+    // Executa `work` sozinho na conexão, dentro de BEGIN/COMMIT; ROLLBACK em erro.
+    const transaction = (work) => enqueue(async () => {
+        await run('BEGIN IMMEDIATE');
+        try {
+            const value = await work();
+            await run('COMMIT');
+            return value;
+        } catch (err) {
+            await run('ROLLBACK').catch(() => {});
+            throw err;
+        }
+    });
+
+    const close = () => new Promise((resolve, reject) => {
+        raw.close((err) => (err ? reject(err) : resolve()));
+    });
+
+    return { raw, run, get, all, exclusive, transaction, close };
 }
 
 module.exports = { createConnection };
