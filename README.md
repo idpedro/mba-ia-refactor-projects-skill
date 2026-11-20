@@ -68,7 +68,7 @@ Problemas encontrados lendo o código original (commit `6d1ce62`) antes de escre
 └── references/
     ├── project-analysis.md          # Fase 1: heurísticas de stack, banco, arquitetura, inventário de endpoints, como subir a app
     ├── anti-patterns.md             # Fase 2: catálogo de 23 anti-patterns com sinais de detecção e severidade
-    ├── report-template.md           # Fase 2: formato do relatório + seção "Decisions requiring approval"
+    ├── report-template.md           # Fase 2: formato do relatório, linha Verification por finding, decisões
     ├── mvc-guidelines.md            # Fase 3: camadas, responsabilidades, layout alvo por stack, bloco final
     └── refactoring-playbook.md      # Fase 3: 16 padrões de transformação com código antes/depois (Python e JS)
 ```
@@ -92,7 +92,10 @@ Problemas encontrados lendo o código original (commit `6d1ce62`) antes de escre
   Isso evita que o agente encerre a fase antes da hora.
 - **As fases 1 e 2 só leem.** O primeiro arquivo é escrito na Fase 3, depois do `y`. A Fase 2 termina obrigatoriamente com a pergunta de confirmação.
 - **O relatório tem uma seção "Decisions requiring approval".** Toda refatoração que muda comportamento observável aparece ali com um default, para o humano aprovar explicitamente. Exemplos: remover `senha` da resposta, exigir token, restringir `/admin/query` a admin e a `SELECT`, trocar o formato de hash.
-- **Decisão escolhe *como* corrigir, nunca *se* corrige.** Todo finding CRITICAL ou HIGH precisa de uma correção ativa na configuração padrão, sem nenhuma variável de ambiente ligada. "Adiado", "não implementado" e "desligado salvo flag" não são defaults aceitos, e a Fase 3 só termina com todos eles resolvidos. Rotas perigosas são protegidas ou restringidas, nunca removidas.
+- **Cada finding traz a prova de que foi resolvido.** Na Fase 2, todo finding ganha uma linha `Verification:` escrita a partir do próprio Impact: são testes que falham no código atual e precisam passar depois da refatoração. Eles nomeiam a identidade de cada request (anônimo, usuário comum, *outro* usuário, admin) e cobrem concorrência e variações de entrada quando o Impact depende delas. A Fase 3 executa todos e só termina quando todos passam, para todos os findings, inclusive MEDIUM e LOW.
+- **Decisão escolhe *como* corrigir, nunca *se* corrige.** Toda correção fica ativa na configuração padrão. "Adiado", "fora do escopo", "não implementado" e "desligado salvo flag" não são defaults aceitos. Rotas perigosas são protegidas ou restringidas, nunca removidas.
+- **O comando original sobe sem nenhuma variável de ambiente.** Chave de assinatura ausente é gerada no boot, senha de seed ausente é gerada e impressa uma vez, e segredo que o código nunca usa é removido em vez de virar requisito. Toda a validação da Fase 3 roda sobre esse boot sem variáveis.
+- **Caminho de atualização.** Quando o projeto guarda dados em arquivo, a Fase 3 também cria um banco com o código *original* e sobe o código novo sobre ele. O esquema é migrado no boot, e as credenciais padrão conhecidas são trocadas em vez de reaproveitadas.
 - **Contrato antes de mexer no código.** Antes de refatorar, a Fase 3 sobe a app original e faz uma request por endpoint, gravando status e chaves da resposta como baseline. A validação compara a app nova contra esse baseline, e não contra "parece funcionar".
 - **Evidência obrigatória.** Todo finding cita um `file:line` conferido com `grep -n`. Toda linha de validação cita uma request realmente feita, e uma checagem que falhou aparece como `✗`, nunca como `✓`.
 
@@ -138,6 +141,14 @@ Por que esses:
   - dois ajustes que antes eu tinha feito à mão viraram regra da skill: liberar o build de dependências nativas quando o npm bloqueia scripts de instalação (`allowScripts`), e salvar o relatório sem bloco de código.
 
   Como a skill mudou, ela foi rodada de novo nos 3 projetos, a partir do código original, para que relatórios e código venham todos da mesma versão.
+- **Auditorias independentes depois do segundo feedback.** Os dois feedbacks tinham a mesma forma: o relatório descrevia o problema, a skill aplicava uma correção que *parecia* resolver e a validação marcava ✓ sem provar que o Impact tinha sumido. Em vez de corrigir só o caso apontado, a skill passou a ser revisada por agentes independentes (outro modelo, sem acesso às minhas conclusões) em duas frentes: uma lendo a skill atrás de brechas desse tipo, outra subindo os projetos refatorados e testando o Impact de cada finding como o avaliador faz. Foram cinco rodadas. Cada uma encontrou uma lacuna genérica, que virou regra da skill antes de rodar tudo de novo a partir do código original:
+  - validação pelo Impact de cada finding (linha `Verification:`), e não só pelo grep de detecção;
+  - o dono de um registro sempre vem do token, inclusive na criação;
+  - senhas de seed vindas do ambiente, nunca literais;
+  - o comando original sobe sem variáveis, e segredo não usado é removido;
+  - unicidade garantida pelo banco e testada com requests simultâneos;
+  - caminho de atualização sobre um banco criado pelo código original;
+  - greps de detecção calibrados contra o código original e o refatorado.
 - **Projeto parcialmente organizado (task-manager).** Ter `models/` e `routes/` não garante camadas corretas. O guideline orienta a manter as pastas que já cumprem seu papel e a tirar a regra de negócio das rotas para controllers novos.
 
 ---
@@ -148,23 +159,19 @@ Por que esses:
 
 | Projeto | Stack detectada | Arquivos | CRITICAL | HIGH | MEDIUM | LOW | Total |
 |---|---|---|---|---|---|---|---|
-| 1 — code-smells-project | Python + Flask 3.1.1 (sqlite3) | 4 / ~780 linhas | 6 | 6 | 5 | 5 | 22 |
-| 2 — ecommerce-api-legacy | JavaScript + Express 4 (sqlite3 em memória) | 3 / ~180 linhas | 4 | 6 | 5 | 5 | 20 |
-| 3 — task-manager-api | Python + Flask 3.0.0 (Flask-SQLAlchemy) | 15 / ~1158 linhas | 7 | 11 | 23 | 5 | 46 |
+| 1 — code-smells-project | Python + Flask 3.1.1 (sqlite3) | 4 / ~780 linhas | 12 | 9 | 10 | 10 | 41 |
+| 2 — ecommerce-api-legacy | JavaScript + Express 4 (sqlite3 em memória) | 3 / ~180 linhas | 5 | 6 | 6 | 5 | 22 |
+| 3 — task-manager-api | Python + Flask 3.0.0 (Flask-SQLAlchemy) | 12 / ~1155 linhas | 8 | 11 | 28 | 36 | 83 |
 
-Na Fase 3, os 3 projetos terminaram com todos os findings resolvidos: 22/22, 20/20 e 46/46, sem nenhum CRITICAL ou HIGH em aberto.
+Todo finding tem uma linha `Verification:` no relatório. Na Fase 3, a skill executou todas e terminou sem nenhum ✗:
 
-Nesta rodada, a skill agrupou mais ocorrências do mesmo anti-pattern por arquivo do que nas anteriores, por isso os totais são menores. Os problemas cobertos são os mesmos.
+| Projeto | Findings verificados | Boot sem variáveis de ambiente | Caminho de atualização |
+|---|---|---|---|
+| 1 | 41/41 | ✓ `python app.py` | ✓ 54/54 checagens sobre banco criado pelo código original |
+| 2 | 22/22 | ✓ `npm start`¹ | n/a (o banco original é em memória) |
+| 3 | 83/83 | ✓ `python seed.py && python app.py` | ✓ 19/19 checagens sobre banco criado pelo código original |
 
-### Estado em memória (AP-09)
-
-| Projeto | Estado no código original | O que a skill fez |
-|---|---|---|
-| 1 | `global db_connection` compartilhada entre threads | Conexão aberta e fechada por request; o objeto `Database` guarda só o caminho do arquivo. |
-| 2 | `let globalCache = {}` escrito a cada checkout, e `let totalRevenue = 0` | Nada lia esses valores, então foram apagados. O checkout registra uma linha de log. |
-| 3 | `self.notifications = []` com `append` a cada task atribuída | Nada lia a lista (o `get_notifications` não tinha chamadas), então ela foi apagada, junto com o serviço, que nunca era usado. |
-
-O grep da AP-09 (`self.x = []`, `this.x = new Map()`, `let`/`var` no topo do módulo, `global`) não encontra nada no código refatorado dos 3 projetos.
+¹ Na máquina onde a skill rodou, a porta 3000 estava ocupada por outra aplicação. O boot sem variáveis foi confirmado até o ponto de escutar, e os testes rodaram com `PORT=3100`.
 
 ### Estrutura antes / depois
 
@@ -177,11 +184,11 @@ controllers.py                .env.example
 database.py                   src/
 models.py                     ├── app.py                  (composition root)
 requirements.txt              ├── config/settings.py
-                              ├── database.py, errors.py
-                              ├── models/        produto, usuario, pedido, sistema
+                              ├── database.py, errors.py  (conexão por request, schema, migração, seed)
+                              ├── models/        produto, usuario, pedido, sistema, constants
                               ├── controllers/   produto, usuario, pedido, sistema, validators
                               ├── views/         produto_routes, usuario_routes, pedido_routes, sistema_routes
-                              ├── services/      auth, notification, relatorio
+                              ├── services/      notification, relatorio
                               └── middlewares/   auth, error_handler
 ```
 
@@ -190,13 +197,13 @@ requirements.txt              ├── config/settings.py
 ```
 ANTES                         DEPOIS
 src/app.js                    src/app.js                  (composition root)
-src/AppManager.js             src/config/index.js
+src/AppManager.js             src/config/index.js, src/constants/roles.js
 src/utils.js                  src/database/    connection, schema, seed
                               src/models/      user, course, enrollment, payment, auditLog
                               src/controllers/ checkout, report, user
                               src/routes/      checkout, admin, user
                               src/services/    payment, password, report
-                              src/middlewares/ adminAuth, asyncHandler, errorHandler
+                              src/middlewares/ auth, asyncHandler, errorHandler
                               src/validators/checkout.validator.js
                               src/utils/logger.js, src/errors.js, .env.example
 ```
@@ -210,12 +217,12 @@ database.py                   seed.py
 seed.py                       .env.example
 models/   task, user,         src/
           category            ├── app.py                  (composition root)
-routes/   task, user,         ├── config/settings.py
-          report              ├── database.py, errors.py
-services/ notification        ├── models/       base, task, user, category
-utils/    helpers             ├── controllers/  task, user, category, report, validators
-                              ├── views/        task, user, category, report, index routes
-                              ├── services/     report
+routes/   task, user,         ├── config/settings.py, constants.py
+          report              ├── database.py, errors.py  (schema, migrações idempotentes)
+services/ notification        ├── models/       base, task, user, category, legacy_password
+utils/    helpers             ├── controllers/  task, user, category, validators
+                              ├── views/        task, user, category, report, system routes
+                              ├── services/     auth, credential, notification, report
                               └── middlewares/  auth, error_handler
 ```
 
@@ -226,12 +233,12 @@ utils/    helpers             ├── controllers/  task, user, category, repo
 | **Fase 1:** linguagem detectada corretamente | ✓ | ✓ | ✓ |
 | **Fase 1:** framework detectado corretamente | ✓ | ✓ | ✓ |
 | **Fase 1:** domínio descrito corretamente | ✓ | ✓ | ✓ |
-| **Fase 1:** número de arquivos condiz com a realidade | ✓ (4) | ✓ (3) | ✓ (15) |
+| **Fase 1:** número de arquivos condiz com a realidade | ✓ (4) | ✓ (3) | ✓ (12) |
 | **Fase 2:** relatório segue o template | ✓ | ✓ | ✓ |
 | **Fase 2:** cada finding tem arquivo e linhas exatos | ✓ | ✓ | ✓ |
 | **Fase 2:** findings ordenados CRITICAL → LOW | ✓ | ✓ | ✓ |
-| **Fase 2:** mínimo de 5 findings | ✓ (22) | ✓ (20) | ✓ (46) |
-| **Fase 2:** APIs deprecated detectadas | n/a¹ | ✓ (1) | ✓ (5) |
+| **Fase 2:** mínimo de 5 findings | ✓ (41) | ✓ (22) | ✓ (83) |
+| **Fase 2:** APIs deprecated detectadas | n/a² | ✓ (1) | ✓ (9) |
 | **Fase 2:** pausa e pede confirmação antes da Fase 3 | ✓ | ✓ | ✓ |
 | **Fase 3:** estrutura de diretórios segue MVC | ✓ | ✓ | ✓ |
 | **Fase 3:** configuração extraída (sem hardcoded) | ✓ | ✓ | ✓ |
@@ -241,29 +248,29 @@ utils/    helpers             ├── controllers/  task, user, category, repo
 | **Fase 3:** error handling centralizado | ✓ | ✓ | ✓ |
 | **Fase 3:** entry point claro | ✓ | ✓ | ✓ |
 | **Fase 3:** aplicação inicia sem erros | ✓ | ✓ | ✓ |
-| **Fase 3:** endpoints originais respondem corretamente | ✓² | ✓² | ✓² |
+| **Fase 3:** endpoints originais respondem corretamente | ✓³ | ✓³ | ✓³ |
 
-¹ O projeto 1 não usa nenhuma API da tabela de deprecated. No projeto 2, a skill marcou a API de callbacks aninhados do `sqlite3`; no projeto 3, `Model.query.get()` e `datetime.utcnow()`, entre outras.
-² Todas as rotas originais continuam existindo e, com as credenciais certas, respondem o mesmo status e as mesmas chaves de antes. As diferenças vêm das decisões aprovadas em cada relatório: rotas protegidas respondem `401` sem token e `403` sem permissão, e campos sensíveis (`senha`, `password`, `secret_key`) saíram das respostas.
+² O projeto 1 não usa nenhuma API da tabela de deprecated. No projeto 2, a skill marcou a API de callbacks aninhados do `sqlite3`; no projeto 3, `Model.query.get()` e `datetime.utcnow()`, entre outras.
+³ Todas as rotas originais continuam existindo e, com as credenciais certas, respondem o mesmo status e as mesmas chaves de antes. As diferenças vêm das decisões aprovadas em cada relatório: rotas protegidas respondem `401` sem credencial e `403` sem permissão, campos sensíveis saíram das respostas, e o `/admin/query` do projeto 1 passou a aceitar só consultas de uma lista fixa.
 
 ### Saída da Fase 1 e pausa da Fase 2
 
-Os blocos abaixo são a saída da Fase 1 nesta rodada. A skill foi executada com `claude -p "/refactor-arch"` sobre o código original. Nos 3 projetos, as Fases 1 e 2 rodaram só com ferramentas de leitura e pararam em `Phase 2 complete. Proceed with refactoring (Phase 3)? [y/n]`. As decisões foram revisadas antes de responder `y` na mesma sessão. No projeto 2, a decisão sobre o formato dos erros foi ajustada para manter as respostas em texto puro, como no original.
+Os blocos abaixo são a saída da Fase 1 nesta rodada. A skill foi executada com `claude -p "/refactor-arch"` sobre o código original. Nos 3 projetos, as Fases 1 e 2 rodaram só com ferramentas de leitura e pararam em `Phase 2 complete. Proceed with refactoring (Phase 3)? [y/n]`. As decisões foram revisadas antes de responder `y` na mesma sessão.
 
 **Projeto 1**
 ```
 ================================
 PHASE 1: PROJECT ANALYSIS
 ================================
-Language:      Python 3 (versão não fixada)
-Framework:     Flask 3.1.1
+Language:      Python (versão não fixada)
+Framework:     Flask 3.1.1 (flask==3.1.1)
 Dependencies:  flask-cors 5.0.1, sqlite3 (stdlib)
 Domain:        API de E-commerce (produtos, usuários, pedidos, itens de pedido, relatório de vendas)
-Architecture:  Partially layered: `controllers.py` e `models.py` existem, mas `app.py` registra rotas e roda SQL, `controllers.py` abre o banco, `models.py` concentra regras de negócio, e há um singleton global de conexão
-Source files:  4 files analyzed (~780 lines): `app.py` (88), `controllers.py` (292), `database.py` (86), `models.py` (314)
+Architecture:  Monolithic — rotas, SQL concatenado, regras de negócio e respostas dividem os mesmos 4 arquivos planos, sem fronteiras entre camadas (app.py registra rotas e executa SQL)
+Source files:  4 files analyzed (~780 lines)
 DB tables:     produtos, usuarios, pedidos, itens_pedido
 Endpoints:     19 routes
-Start command: `python app.py` (porta 5000)
+Start command: python app.py
 ================================
 ```
 
@@ -272,11 +279,11 @@ Start command: `python app.py` (porta 5000)
 ================================
 PHASE 1: PROJECT ANALYSIS
 ================================
-Language:      JavaScript (Node.js, versão não fixada)
+Language:      JavaScript (Node.js; runtime não fixado no manifest; v24.22.1 instalado)
 Framework:     Express ^4.18.2
 Dependencies:  sqlite3 ^5.1.6
-Domain:        LMS API com checkout (users, courses, enrollments, payments, audit_logs)
-Architecture:  Monolithic — a classe AppManager abre o banco, cria o schema, registra rotas, executa SQL e aplica regras de negócio
+Domain:        LMS API com checkout (courses, enrollments, payments, users)
+Architecture:  Monolítica — uma única classe (AppManager) abre o banco, cria o schema, registra as rotas, executa SQL e aplica as regras de negócio
 Source files:  3 files analyzed (~180 lines)
 DB tables:     users, courses, enrollments, payments, audit_logs
 Endpoints:     3 routes
@@ -289,164 +296,145 @@ Start command: npm start (node src/app.js)
 ================================
 PHASE 1: PROJECT ANALYSIS
 ================================
-Language:      Python (3.14 no ambiente; sem versão pinada no projeto)
-Framework:     Flask 3.0.0
-Dependencies:  flask-sqlalchemy 3.1.1, flask-cors 4.0.0, marshmallow 3.20.1 (sem uso), requests 2.31.0 (sem uso), python-dotenv 1.0.0 (sem uso)
-Domain:        Task Manager API (tasks, users, categories)
-Architecture:  Partially layered — existem models/, routes/, services/, utils/, mas as rotas executam queries e regras de negócio, o service não é usado e os helpers são ignorados
-Source files:  15 files analyzed (~1158 lines)
-DB tables:     tasks, users, categories
+Language:      Python (runtime local 3.14.9; versão não fixada no projeto)
+Framework:     Flask 3.0.0 (flask==3.0.0)
+Dependencies:  flask-sqlalchemy==3.1.1, flask-cors==4.0.0, marshmallow==3.20.1 (não importado), requests==2.31.0 (não importado), python-dotenv==1.0.0 (não importado)
+Domain:        Task Manager API (tasks, users, categories, relatórios)
+Architecture:  Partially layered — existem models/, routes/, services/, utils/, mas as rotas executam queries, aplicam regras (atraso, estatísticas, login) e montam respostas à mão; NotificationService e utils/helpers.py nunca são usados
+Source files:  12 files analyzed (~1155 lines)
+DB tables:     users, tasks, categories (SQLite via Flask-SQLAlchemy, sqlite:///tasks.db → instance/tasks.db)
 Endpoints:     22 routes
-Start command: python seed.py && python app.py   (http://localhost:5000)
+Start command: python seed.py && python app.py (README: rodar o seed antes do primeiro boot; servidor em :5000)
 ================================
 ```
 
 ### Controle de acesso e logs após a refatoração
 
-Cada app foi iniciada com o comando original do projeto, com o banco em `/tmp`. Um script chamou cada rota como anônimo, como usuário comum, como admin e com um token inválido; as colunas mostram o status HTTP retornado. As requests foram feitas na ordem da tabela, sobre o mesmo banco.
+Cada app foi iniciada a partir de uma cópia limpa, com o comando original e **sem nenhuma variável de ambiente**: o projeto 2 recebeu só `PORT=3100`, pela porta ocupada. As senhas das contas do seed foram lidas do log, onde a própria app as imprime uma vez. Um script chamou cada rota como anônimo, como usuários comuns, como admin e com uma credencial inválida; as colunas mostram o status HTTP. As requests seguem a ordem da tabela, sobre o mesmo banco.
 
-**Projeto 1** (`python app.py`). Cliente: `joao@email.com`; admin: `admin@loja.com`, ambos do seed; `forjado` é um token com assinatura inválida.
+**Projeto 1** (`python app.py`). Usuários comuns `joao` e `maria`, admin `admin@loja.com`; `forjado` é um token com assinatura inválida.
 ```
-login cliente: 200
+login joao: 200
+login maria: 200
 login admin: 200
-ROUTE                                      anon  cliente    admin  forjado
-GET /                                       200      200      200      200
-GET /health                                 200      200      200      200
-GET /produtos                               200      200      200      200
-GET /produtos/1                             200      200      200      200
-GET /produtos/busca?q=mouse                 200      200      200      200
-GET /usuarios                               401      403      200      401
-GET /usuarios/2                             401      200      200      401
-GET /usuarios/3                             401      403      200      401
-GET /pedidos                                401      403      200      401
-GET /pedidos/usuario/2                      401      200      200      401
-GET /relatorios/vendas                      401      403      200      401
-POST /pedidos                               401      201      201      401
-PUT /pedidos/1/status                       401      403      200      401
-POST /produtos                              401      403      201      401
-PUT /produtos/2                             401      403      200      401
-POST /admin/query                           401      403      200      401
-DELETE /produtos/9                          401      403      200      401
-cadastro anônimo: 201 {"dados":{"id":4},"sucesso":true}
+ROUTE                                        anon     joao    maria    admin  forjado
+GET /                                         200      200      200      200      200
+GET /health                                   200      200      200      200      200
+GET /produtos                                 200      200      200      200      200
+GET /produtos/1                               200      200      200      200      200
+GET /produtos/busca?q=mouse                   200      200      200      200      200
+GET /usuarios                                 401      403      403      200      401
+GET /usuarios/2                               401      200      403      200      401
+GET /pedidos                                  401      403      403      200      401
+GET /pedidos/usuario/2                        401      200      403      200      401
+GET /relatorios/vendas                        401      403      403      200      401
+POST /pedidos                                 401      201      201      201      401
+PUT /pedidos/1/status                         401      403      403      200      401
+POST /produtos                                401      403      403      201      401
+PUT /produtos/2                               401      403      403      200      401
+POST /admin/query                             401      403      403      200      401
+joao cria pedido em nome da maria: 403 {"erro":"Apenas administradores criam pedidos para outros usu\u00e1rios","sucesso":false}
+
+login com a senha antiga do seed (admin123): 401 {"erro":"Email ou senha inv\u00e1lidos","sucesso":false}
 
 login com SQL injection: 401 {"erro":"Email ou senha inv\u00e1lidos","sucesso":false}
 
-admin/query com DELETE (admin): 400 {"erro":"Apenas uma consulta SELECT \u00e9 permitida","sucesso":false}
+admin/query com SQL livre (admin): 400 {"erro":"Consulta n\u00e3o permitida","sucesso":false}
 
 reset-db como cliente: 403 {"erro":"Acesso restrito a administradores","sucesso":false}
-
-GET /usuarios/1 (admin) corpo: 200 {"dados":{"criado_em":"2026-11-17 02:16:37","email":"admin@loja.com","id":1,"nome":"Admin"
 ```
 
-Trecho do log do servidor:
+Trecho do log do servidor (senhas mascaradas aqui):
 ```
+WARNING src.database: Senha gerada para admin@loja.com: <senha gerada> (exibida uma única vez; defina ADMIN_
+WARNING src.database: Senha gerada para joao@email.com: <senha gerada> (exibida uma única vez; defina JOAO_P
+WARNING src.database: Senha gerada para maria@email.com: <senha gerada> (exibida uma única vez; defina MARIA
  * Debug mode: off
  * Running on http://127.0.0.1:5000
-[16/Nov/2026 23:16:40] "GET / HTTP/1.1" 200 -
-[16/Nov/2026 23:16:40] "GET / HTTP/1.1" 200 -
-[16/Nov/2026 23:16:40] "GET / HTTP/1.1" 200 -
-[16/Nov/2026 23:16:40] "GET / HTTP/1.1" 200 -
-[16/Nov/2026 23:16:40] "GET /health HTTP/1.1" 200 -
-[16/Nov/2026 23:16:40] "GET /health HTTP/1.1" 200 -
-[16/Nov/2026 23:16:40] "GET /health HTTP/1.1" 200 -
-[16/Nov/2026 23:16:40] "GET /health HTTP/1.1" 200 -
-[16/Nov/2026 23:16:40] "GET /produtos HTTP/1.1" 200 -
-[16/Nov/2026 23:16:40] "GET /produtos HTTP/1.1" 200 -
-[16/Nov/2026 23:16:40] "GET /produtos HTTP/1.1" 200 -
-[16/Nov/2026 23:16:40] "GET /produtos HTTP/1.1" 200 -
+[19/Nov/2026 22:19:01] "POST /login HTTP/1.1" 200 -
+[19/Nov/2026 22:19:01] "POST /login HTTP/1.1" 200 -
+[19/Nov/2026 22:19:01] "POST /login HTTP/1.1" 200 -
+[19/Nov/2026 22:19:01] "GET / HTTP/1.1" 200 -
+[19/Nov/2026 22:19:01] "GET / HTTP/1.1" 200 -
+[19/Nov/2026 22:19:01] "GET / HTTP/1.1" 200 -
+[19/Nov/2026 22:19:01] "GET / HTTP/1.1" 200 -
 ```
 
-**Projeto 2** (`ADMIN_TOKEN=meu-token npm start`). O projeto não tem login, então as rotas de admin usam o token estático de config. Sem `ADMIN_TOKEN` definido, elas respondem `401` a todos.
+**Projeto 2** (`npm start`). O projeto não tem rota de login, então as rotas de admin usam HTTP Basic (e-mail e senha conferidos contra o hash). `errado` é a conta admin com senha errada.
 ```
-ROUTE                                      anon   errado    admin
-GET /api/admin/financial-report             401      401      200
+ROUTE                                        anon   leonan    admin   errado
+GET /api/admin/financial-report               401      403      200      401
 checkout novo usuário, cartão 4: 200 {"msg":"Sucesso","enrollment_id":2}
 checkout cartão 5 (recusado): 400 Pagamento recusado
 checkout com campos faltando: 400 Bad Request
 checkout curso inexistente: 404 Curso não encontrado
-relatório (admin) corpo: 200 [{"course":"Clean Architecture","revenue":997,"students":[{"student":"Leonan","paid":997}]
-DELETE user sem token: 401 Unauthorized
-DELETE user token errado: 401 Unauthorized
-DELETE user admin: 200 Usuário deletado, junto com as matrículas e pagamentos relacionados.
+checkout com e-mail do Leonan e a senha antiga '123': 403 Acesso negado
+DELETE user sem credencial: 401 Não autenticado
+DELETE user como usuário comum: 403 Acesso restrito a administradores
+DELETE user com senha errada: 401 Credenciais inválidas
+DELETE user como admin: 200 Usuário deletado.
 ```
-Log do servidor (o cartão aparece só com os 4 últimos dígitos, e o antigo cache virou uma linha de log):
+Log do servidor (o cartão aparece só com os 4 últimos dígitos):
 ```
-2026-11-17T02:16:49.702Z INFO Frankenstein LMS rodando em 127.0.0.1:3000...
-2026-11-17T02:16:51.652Z INFO Processando cartão final 4444 (gateway não configurado)
-2026-11-17T02:16:51.680Z INFO Checkout do curso 2 pelo usuário 2
-2026-11-17T02:16:51.682Z INFO Processando cartão final 4444 (gateway não configurado)
-2026-11-17T02:16:51.687Z INFO Usuário 1 removido com matrículas e pagamentos
+2026-11-20T01:19:19.723Z INFO Senha gerada para leonan@fullcycle.com.br: <senha gerada> (defina SEED_USER_PASSWORD para fixá-la)
+2026-11-20T01:19:19.753Z INFO Senha gerada para admin@fullcycle.com.br: <senha gerada> (defina ADMIN_PASSWORD para fixá-la)
+2026-11-20T01:19:19.788Z INFO Frankenstein LMS rodando em http://127.0.0.1:3100
+2026-11-20T01:19:30.869Z INFO Processando cartão final 4444 no valor de 497
+2026-11-20T01:19:30.898Z INFO Checkout concluído: curso 2, usuário 3, matrícula 2
+2026-11-20T01:19:30.900Z INFO Processando cartão final 4444 no valor de 997
+2026-11-20T01:19:31.024Z INFO Remoção do usuário 1: 1 registro(s) removido(s)
 ```
 
-**Projeto 3** (`python seed.py && python app.py`). Usuária comum: `maria@email.com`; admin: `joao@email.com`, ambos do seed; `fake` é o antigo `fake-jwt-token-1`.
+**Projeto 3** (`python seed.py && python app.py`). Usuária comum `maria`, admin `joao@email.com`; `fake` é o antigo `fake-jwt-token-1`.
 ```
 login maria: 200
 login admin: 200
-ROUTE                                      anon    maria    admin     fake
-GET /                                       200      200      200      200
-GET /health                                 200      200      200      200
-GET /tasks                                  401      200      200      401
-GET /tasks/1                                401      200      200      401
-GET /tasks/search?q=a                       401      200      200      401
-GET /tasks/stats                            401      200      200      401
-GET /categories                             401      200      200      401
-GET /users                                  401      403      200      401
-GET /users/1                                401      403      200      401
-GET /users/2                                401      200      200      401
-GET /users/2/tasks                          401      200      200      401
-GET /reports/summary                        401      403      200      401
-GET /reports/user/2                         401      200      200      401
-POST /categories                            401      403      201      401
-PUT /categories/1                           401      403      200      401
-PUT /users/2                                401      200      200      401
-```
-Escrita em dados de outros usuários, num banco recém-criado:
-```
-login maria: 200
-login admin: 200
-maria edita a própria task 2: 200 {"category_id":2,"created_at":"2026-11-17 02:17:13.703631","description":"Tela de login re
+ROUTE                                        anon    maria    admin     fake
+GET /                                         200      200      200      200
+GET /health                                   200      200      200      200
+GET /tasks                                    401      200      200      401
+GET /tasks/2                                  401      200      200      401
+GET /tasks/search?q=a                         401      200      200      401
+GET /tasks/stats                              401      200      200      401
+GET /categories                               401      200      200      401
+GET /users                                    401      403      200      401
+GET /users/1                                  401      403      200      401
+GET /users/2                                  401      200      200      401
+GET /users/2/tasks                            401      200      200      401
+GET /reports/summary                          401      403      200      401
+GET /reports/user/2                           401      200      200      401
+POST /categories                              401      403      201      401
+PUT /categories/1                             401      403      200      401
+maria edita a própria task 2: 200 {"category_id":2,"created_at":"2026-11-20 01:19:40.714195","description":"Tela de login re
 maria edita a task 1 do joao: 403 {"error":"Acesso negado"}
 
 maria apaga a task 3 do pedro: 403 {"error":"Acesso negado"}
 
+maria cria task em nome do joao: 403 {"error":"Apenas administradores criam tasks para outros usu\u00e1rios"}
+
+maria cria task para si: 201 {"category_id":null,"created_at":"2026-11-20 01:19:54.503926","description":"","due_date":
+maria se promove a admin: 403 {"error":"Apenas administradores alteram role ou status"}
+
+login com a senha antiga do seed (1234): 401 {"error":"Credenciais inv\u00e1lidas"}
+
 admin apaga a task 3 do pedro: 200 {"message":"Task deletada com sucesso"}
-
-maria cria task para si: 201 {"category_id":null,"created_at":"2026-11-17 02:17:16.997787","description":"","due_date":
-maria cria task para o joao: 201 {"category_id":null,"created_at":"2026-11-17 02:17:17.000153","description":"","due_date":
-cadastro anônimo pedindo admin: 403 {"error":"Apenas administradores podem definir o role"}
-
-maria se promove a admin: 403 {"error":"Apenas administradores podem alterar role ou active"}
-
-admin apaga categoria 4: 200 {"message":"Categoria deletada"}
-
-maria apaga o usuário 3: 403 {"error":"Acesso restrito a administradores"}
-
-admin apaga o usuário 3: 200 {"message":"Usu\u00e1rio deletado com sucesso"}
-```
-Um usuário comum pode criar uma task atribuída a outro usuário, como no original: atribuir tarefas a colegas faz parte do domínio. Editar e apagar tasks alheias, por outro lado, fica restrito ao dono ou ao admin.
-
-Log do servidor durante o teste de escrita:
-```
- * Debug mode: off
- * Running on http://127.0.0.1:5000
-[16/Nov/2026 23:17:16] "PUT /tasks/2 HTTP/1.1" 200 -
-[16/Nov/2026 23:17:16] "PUT /tasks/1 HTTP/1.1" 403 -
-[16/Nov/2026 23:17:16] "DELETE /tasks/3 HTTP/1.1" 403 -
-[16/Nov/2026 23:17:16] "DELETE /tasks/3 HTTP/1.1" 200 -
-[16/Nov/2026 23:17:16] "POST /tasks HTTP/1.1" 201 -
-[16/Nov/2026 23:17:17] "POST /tasks HTTP/1.1" 201 -
-[16/Nov/2026 23:17:17] "POST /users HTTP/1.1" 403 -
-[16/Nov/2026 23:17:17] "PUT /users/2 HTTP/1.1" 403 -
-[16/Nov/2026 23:17:17] "DELETE /categories/4 HTTP/1.1" 200 -
-[16/Nov/2026 23:17:17] "DELETE /users/3 HTTP/1.1" 403 -
-[16/Nov/2026 23:17:17] "DELETE /users/3 HTTP/1.1" 200 -
 ```
 
 ### Comportamento da skill em stacks diferentes
 
-- **Projeto 1, Python com sqlite3 puro:** a skill criou o layout MVC completo. A autenticação usa tokens assinados com `itsdangerous`. O `/admin/query` continua existindo, só para admin, aceitando apenas `SELECT` numa conexão somente leitura. A conexão global virou uma conexão por request.
-- **Projeto 2, Express com callbacks:** a pirâmide de callbacks virou `async/await`, com o checkout numa transação. Como o projeto não tem login, as rotas de admin usam um token estático de config (fail closed). As respostas de erro continuam em texto puro, porque fazem parte do contrato. O cache global, que ninguém lia, foi removido.
-- **Projeto 3, parcialmente organizado:** gerou o maior número de findings, incluindo APIs deprecated. A estrutura existente foi reorganizada em `src/`, com controllers novos recebendo a regra de negócio, e a lista de notificações em memória foi removida junto com o serviço que nunca era chamado.
+- **Projeto 1, Python com sqlite3 puro:** a skill criou o layout MVC completo. A autenticação usa tokens assinados com `itsdangerous`. O `/admin/query` continua existindo, só para admin, mas executa apenas consultas de uma lista fixa, e SQL livre recebe `400`. A conexão global virou uma conexão por request. Num banco criado pelo código original, as senhas padrão do seed são trocadas no boot.
+- **Projeto 2, Express com callbacks:** a pirâmide de callbacks virou `async/await`, com transações serializadas na conexão compartilhada. Como o projeto não tem login, as rotas de admin usam HTTP Basic contra uma conta admin semeada. As respostas de erro continuam em texto puro, porque fazem parte do contrato. A chave do gateway de pagamento, que o código nunca usava, foi removida em vez de virar requisito.
+- **Projeto 3, parcialmente organizado:** gerou o maior número de findings, incluindo as APIs deprecated. A estrutura existente foi reorganizada em `src/`, com controllers novos recebendo a regra de negócio. Hashes MD5 de um banco existente são migrados sem exigir a senha original, e o índice único de e-mail é criado no boot também em bancos antigos.
+
+### Limitações conhecidas
+
+A última auditoria independente encontrou estes pontos. Nenhum aparece num clone limpo, que é o cenário em que os relatórios e os testes acima foram feitos:
+
+1. **Projeto 3, banco antigo com e-mails duplicados por maiúsculas.** Se um banco criado pelo código original tiver `JOAO@EMAIL.COM` e `joao@email.com` ao mesmo tempo (o código original permitia), a criação do índice único falha no boot e a app não sobe. O projeto 1 já trata esse caso, renomeando o duplicado mais recente antes de criar o índice; o projeto 3 precisaria do mesmo tratamento.
+2. **Projeto 1, itens órfãos antigos.** Itens de pedido que ficaram órfãos porque o código original apagou um produto de verdade continuam no banco depois da atualização. Exclusões novas são lógicas e não geram órfãos.
+3. **Projetos 1 e 3, inteiros fora do intervalo do SQLite.** Valores acima de 2⁶³ em campos numéricos causam `500` em vez de `400`.
+4. **Projeto 2, e-mails duplicados num banco em arquivo antigo.** É o mesmo caso do item 1, mas só se alguém tivesse usado um banco em arquivo; o original era só em memória.
+5. **Projeto 3, um finding impreciso.** O AP-10 sobre categorias órfãs descreve um problema que o original não tinha, porque o relacionamento do ORM já anulava o `category_id`. A correção aplicada não causa efeito colateral.
 
 ---
 
@@ -479,33 +467,36 @@ A skill imprime a análise (Fase 1) e o relatório (Fase 2), e para em `Proceed 
 
 ### Validar a refatoração
 
+Nenhum projeto precisa de variável de ambiente para subir. As senhas das contas do seed vêm de variáveis (listadas no `.env.example` de cada projeto) ou, quando elas não estão definidas, são geradas e impressas uma única vez no log, numa linha `Senha gerada para <email>: <senha>`.
+
 ```bash
-# Projeto 1 — admin do seed: admin@loja.com / admin123
+# Projeto 1 — admin: admin@loja.com (senha em ADMIN_PASSWORD ou no log do primeiro boot)
 cd code-smells-project
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python app.py                       # http://localhost:5000
+.venv/bin/python app.py                       # http://127.0.0.1:5000
 TOKEN=$(curl -s -X POST localhost:5000/login -H 'Content-Type: application/json' \
-  -d '{"email":"admin@loja.com","senha":"admin123"}' | python -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  -d '{"email":"admin@loja.com","senha":"<senha do log>"}' | python -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 curl localhost:5000/usuarios                                   # 401
 curl -H "Authorization: Bearer $TOKEN" localhost:5000/usuarios # 200
 
-# Projeto 2 — rotas de admin exigem ADMIN_TOKEN
+# Projeto 2 — admin: admin@fullcycle.com.br (senha em ADMIN_PASSWORD ou no log do boot), via HTTP Basic
 cd ecommerce-api-legacy
 npm install
-ADMIN_TOKEN=meu-token npm start               # http://localhost:3000
-# use api.http, com @adminToken = meu-token, para as rotas administrativas
+npm start                                     # http://127.0.0.1:3000
+curl localhost:3000/api/admin/financial-report                                    # 401
+curl -u 'admin@fullcycle.com.br:<senha do log>' localhost:3000/api/admin/financial-report   # 200
 
-# Projeto 3 — admin do seed: joao@email.com / 1234
+# Projeto 3 — admin: joao@email.com (senha em SEED_ADMIN_PASSWORD ou na saída do seed)
 cd task-manager-api
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python seed.py
-.venv/bin/python app.py                       # http://localhost:5000
+.venv/bin/python app.py                       # http://127.0.0.1:5000
 TOKEN=$(curl -s -X POST localhost:5000/login -H 'Content-Type: application/json' \
-  -d '{"email":"joao@email.com","password":"1234"}' | python -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+  -d '{"email":"joao@email.com","password":"<senha do seed>"}' | python -c 'import json,sys; print(json.load(sys.stdin)["token"])')
 curl -H "Authorization: Bearer $TOKEN" localhost:5000/tasks    # 200
 ```
 
-As variáveis de ambiente de cada projeto estão documentadas no `.env.example` dele (`SECRET_KEY`, `PORT`, `HOST`, `CORS_ORIGINS`, `ADMIN_TOKEN`, `TOKEN_MAX_AGE`, …). Sem nenhuma variável definida, a autenticação já vem ativa, o servidor escuta só em `127.0.0.1` e a `SECRET_KEY` é gerada a cada boot, o que invalida os tokens a cada reinício.
+Sem nenhuma variável definida, a autenticação já vem ativa, o servidor escuta só em `127.0.0.1` e a chave de assinatura é gerada a cada boot, o que invalida os tokens a cada reinício. As variáveis opcionais de cada projeto estão no `.env.example` dele.
 
 No npm 11+, scripts de instalação de dependências podem ser bloqueados por padrão. A própria skill trata isso: quando uma dependência nativa não compila, ela aprova o script e grava o campo `allowScripts` no `package.json`, como aconteceu com o `sqlite3` do projeto 2. Versões anteriores do npm ignoram esse campo.
 
